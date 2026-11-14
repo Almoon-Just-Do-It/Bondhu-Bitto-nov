@@ -21,8 +21,5 @@ ADMIN_NAME = "BonDhu Bitto Admin"
 APP_URL = "https://bondhu-bitto.YOUR-SUBDOMAIN.workers.dev"
 WHATSAPP_NUMBER = ""
 
-[limits]
-cpu_ms = 30000
-
 [observability]
 enabled = true

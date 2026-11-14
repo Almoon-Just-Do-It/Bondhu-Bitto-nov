@@ -69,7 +69,7 @@ The Worker version in `src/index.js` uses Cloudflare D1 instead of SQLite and is
 Build command: `npm run build` (bundles and validates with `wrangler deploy --dry-run`).
 Deploy command: `npm run deploy` (runs `wrangler deploy`).
 
-Bcrypt password hashing needs more than the Workers Free plan's 10 ms CPU limit. Use a Workers Paid plan; `wrangler.toml` raises the CPU limit to 30 seconds.
+The Worker uses Web Crypto PBKDF2 password hashing, so it runs on the Workers Free plan. Legacy bcrypt hashes from an old SQLite database are still accepted for login, but they can exceed the Free plan CPU limit.
 
 For local Worker development, copy `.dev.vars.example` to `.dev.vars`, run `npm run db:migrate:local`, then `npm run dev:worker`. Requires a current Microsoft Visual C++ Redistributable on Windows; if `workerd` crashes with an access violation, install the latest VC++ Redistributable.
 

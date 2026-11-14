@@ -7,6 +7,7 @@ const app = new Hono();
 
 const SESSION_COOKIE = "bb_session";
 const SESSION_SECONDS = 12 * 60 * 60;
+const PASSWORD_ITERATIONS = 150000;
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -63,6 +64,39 @@ function bytesToBase64(bytes) {
     binary += String.fromCharCode.apply(null, bytes.subarray(index, index + chunk));
   }
   return btoa(binary);
+}
+
+function equalBytes(left, right) {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index++) difference |= left[index] ^ right[index];
+  return difference === 0;
+}
+
+async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations: PASSWORD_ITERATIONS, hash: "SHA-256" },
+    key,
+    256
+  );
+  return `pbkdf2$${PASSWORD_ITERATIONS}$${bytesToBase64(salt)}$${bytesToBase64(new Uint8Array(bits))}`;
+}
+
+async function verifyPassword(password, stored) {
+  if (!stored) return false;
+  if (stored.startsWith("pbkdf2$")) {
+    const [, iterations, saltBase64, hashBase64] = stored.split("$");
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+    const bits = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt: base64ToBytes(saltBase64), iterations: Number(iterations), hash: "SHA-256" },
+      key,
+      256
+    );
+    return equalBytes(new Uint8Array(bits), base64ToBytes(hashBase64));
+  }
+  return bcrypt.compareSync(password, stored);
 }
 
 function parseDataUpload(data, allowedMimes, maxBytes) {
@@ -138,7 +172,7 @@ async function ensureAdmin(env) {
       if (password.length < 10) {
         throw new Error("Set ADMIN_PASSWORD secret to at least 10 characters.");
       }
-      const hash = bcrypt.hashSync(password, 12);
+      const hash = await hashPassword(password);
       await env.DB.prepare("INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?,'admin')")
         .bind(clean(env.ADMIN_NAME || "BonDhu Bitto Admin", 100), email, hash)
         .run();
@@ -196,7 +230,7 @@ app.post("/api/login", rateLimit("login", 10, 15 * 60 * 1000), async (c) => {
   const email = clean(body.email, 254).toLowerCase();
   const password = String(body.password || "");
   const user = await c.env.DB.prepare("SELECT * FROM users WHERE email=?").bind(email).first();
-  if (!user || !user.active || !bcrypt.compareSync(password, user.password_hash)) {
+  if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
     return c.json({ error: "Email or password is incorrect." }, 401);
   }
   const token = await sign(
@@ -281,7 +315,7 @@ app.post("/api/password/reset", rateLimit("reset", 5, 15 * 60 * 1000), async (c)
     .bind(tokenHash, now)
     .first();
   if (!reset) return c.json({ error: "This password reset link is invalid or has expired." }, 400);
-  const hash = bcrypt.hashSync(password, 12);
+  const hash = await hashPassword(password);
   const results = await c.env.DB.batch([
     c.env.DB.prepare("UPDATE users SET password_hash=? WHERE id=? AND active=1").bind(hash, reset.user_id),
     c.env.DB.prepare("DELETE FROM password_resets WHERE user_id=?").bind(reset.user_id)
@@ -616,7 +650,7 @@ app.post("/api/members", auth, adminOnly, async (c) => {
     return c.json({ error: "Enter a name, valid email and a password of at least 10 characters." }, 400);
   }
   try {
-    const hash = bcrypt.hashSync(password, 12);
+    const hash = await hashPassword(password);
     const info = await c.env.DB
       .prepare("INSERT INTO users(name,email,phone,password_hash,role) VALUES(?,?,?,?,'member')")
       .bind(name, email, phone, hash)
