@@ -34,6 +34,47 @@ A full-stack starter application with:
 The initial administrator is created automatically the first time the server starts.
 The database is stored in `data/bondhu-bitto.sqlite`.
 
+## Deploying to Cloudflare Workers
+
+The Worker version in `src/index.js` uses Cloudflare D1 instead of SQLite and is configured in `wrangler.toml`. The old Express/SQLite server (`server.js`) still runs locally with `npm start`.
+
+1. Install dependencies and sign in to Cloudflare:
+   ```powershell
+   npm install
+   npx wrangler login
+   ```
+2. Create the D1 database:
+   ```powershell
+   npx wrangler d1 create bondhu-bitto
+   ```
+   Copy the returned `database_id` into `wrangler.toml`, replacing `REPLACE_WITH_YOUR_D1_DATABASE_ID`.
+3. Apply the schema:
+   ```powershell
+   npm run db:migrate
+   ```
+4. Set secrets (prompted values):
+   ```powershell
+   npx wrangler secret put JWT_SECRET
+   npx wrangler secret put ADMIN_EMAIL
+   npx wrangler secret put ADMIN_PASSWORD
+   ```
+   `JWT_SECRET` must be at least 32 characters, `ADMIN_PASSWORD` at least 10 characters. The administrator is created automatically on the first login.
+5. Update `APP_URL` in `wrangler.toml` to your Worker URL after the first deploy. Password reset email also requires `RESEND_API_KEY` and `MAIL_FROM` secrets (Cloudflare Workers cannot use SMTP/nodemailer).
+6. Build and deploy:
+   ```powershell
+   npm run build
+   npm run deploy
+   ```
+
+Build command: `npm run build` (bundles and validates with `wrangler deploy --dry-run`).
+Deploy command: `npm run deploy` (runs `wrangler deploy`).
+
+Bcrypt password hashing needs more than the Workers Free plan's 10 ms CPU limit. Use a Workers Paid plan; `wrangler.toml` raises the CPU limit to 30 seconds.
+
+For local Worker development, copy `.dev.vars.example` to `.dev.vars`, run `npm run db:migrate:local`, then `npm run dev:worker`. Requires a current Microsoft Visual C++ Redistributable on Windows; if `workerd` crashes with an access violation, install the latest VC++ Redistributable.
+
+Data in the local `data/bondhu-bitto.sqlite` database is not copied to D1 automatically.
+
 ## Important before real use
 This is a functional starter project, not a certified banking or accounting system.
 - Deploy only over HTTPS.

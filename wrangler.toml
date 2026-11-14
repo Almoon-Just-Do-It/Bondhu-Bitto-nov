@@ -1,0 +1,28 @@
+name = "bondhu-bitto"
+main = "src/index.js"
+compatibility_date = "2025-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bondhu-bitto"
+database_id = "e14bebb4-adaa-48cb-a617-ec92efe720ef"
+migrations_dir = "migrations"
+
+[vars]
+NODE_ENV = "production"
+ADMIN_NAME = "BonDhu Bitto Admin"
+APP_URL = "https://bondhu-bitto.YOUR-SUBDOMAIN.workers.dev"
+WHATSAPP_NUMBER = ""
+
+[limits]
+cpu_ms = 30000
+
+[observability]
+enabled = true

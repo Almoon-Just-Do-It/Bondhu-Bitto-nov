@@ -146,7 +146,7 @@ if (!existingAdmin) {
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "12mb" }));
 app.use(cookieParser());
-app.use("/image", express.static(path.join(__dirname, "image")));
+app.use("/image", express.static(path.join(__dirname, "public", "image")));
 app.use(express.static(path.join(__dirname, "public")));
 
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false });

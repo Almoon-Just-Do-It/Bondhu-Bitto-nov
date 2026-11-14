@@ -1,0 +1,8 @@
+JWT_SECRET=replace-this-with-a-long-random-secret-at-least-32-chars
+ADMIN_NAME=BonDhu Bitto Admin
+ADMIN_EMAIL=admin@bondhubitto.local
+ADMIN_PASSWORD=ChangeThisPassword123!
+APP_URL=http://localhost:8787
+WHATSAPP_NUMBER=8801XXXXXXXXX
+RESEND_API_KEY=
+MAIL_FROM=BonDhu Bitto <no-reply@example.com>
