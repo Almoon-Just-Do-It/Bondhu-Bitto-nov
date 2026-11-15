@@ -7,7 +7,7 @@ const app = new Hono();
 
 const SESSION_COOKIE = "bb_session";
 const SESSION_SECONDS = 12 * 60 * 60;
-const PASSWORD_ITERATIONS = 150000;
+const PASSWORD_ITERATIONS = 100000;
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -118,6 +118,14 @@ function parseProfileImage(value) {
 
 function safeFilename(value) {
   return clean(value, 120).replace(/[\\/\r\n\0]/g, "_") || "attachment";
+}
+
+function blobBytes(data) {
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (Array.isArray(data)) return new Uint8Array(data);
+  if (data && Array.isArray(data.data)) return new Uint8Array(data.data);
+  return data;
 }
 
 async function readBody(c) {
@@ -410,7 +418,7 @@ app.get("/api/notices/:id/image", auth, async (c) => {
     .bind(Number(c.req.param("id")))
     .first();
   if (!notice?.image_data) return c.json({ error: "Notice image not found." }, 404);
-  return c.body(notice.image_data, 200, {
+  return c.body(blobBytes(notice.image_data), 200, {
     "Content-Type": notice.image_mime,
     "Cache-Control": "private, no-store",
     "X-Content-Type-Options": "nosniff"
@@ -423,7 +431,7 @@ app.get("/api/notices/:id/file", auth, async (c) => {
     .bind(Number(c.req.param("id")))
     .first();
   if (!notice?.file_data) return c.json({ error: "Notice file not found." }, 404);
-  return c.body(notice.file_data, 200, {
+  return c.body(blobBytes(notice.file_data), 200, {
     "Content-Type": notice.file_mime,
     "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(notice.file_name)}`,
     "Cache-Control": "private, no-store",
@@ -470,7 +478,7 @@ app.get("/api/emergency/:id/image", auth, adminOnly, async (c) => {
     .bind(Number(c.req.param("id")))
     .first();
   if (!message?.image_data) return c.json({ error: "Emergency image not found." }, 404);
-  return c.body(message.image_data, 200, {
+  return c.body(blobBytes(message.image_data), 200, {
     "Content-Type": message.image_mime,
     "Cache-Control": "private, no-store",
     "X-Content-Type-Options": "nosniff"
@@ -483,7 +491,7 @@ app.get("/api/emergency/:id/file", auth, adminOnly, async (c) => {
     .bind(Number(c.req.param("id")))
     .first();
   if (!message?.file_data) return c.json({ error: "Emergency file not found." }, 404);
-  return c.body(message.file_data, 200, {
+  return c.body(blobBytes(message.file_data), 200, {
     "Content-Type": message.file_mime,
     "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(message.file_name)}`,
     "Cache-Control": "private, no-store",

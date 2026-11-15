@@ -30,5 +30,16 @@
   },
   "devDependencies": {
     "wrangler": "^4.162.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Almoon-Just-Do-It/Bondhu-Bitto-nov.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Almoon-Just-Do-It/Bondhu-Bitto-nov/issues"
+  },
+  "homepage": "https://github.com/Almoon-Just-Do-It/Bondhu-Bitto-nov#readme"
 }

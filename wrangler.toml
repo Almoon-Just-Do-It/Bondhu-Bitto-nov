@@ -1,4 +1,4 @@
-name = "bondhu-bitto"
+name = "bondhu-bitto-nov"
 main = "src/index.js"
 compatibility_date = "2025-11-01"
 compatibility_flags = ["nodejs_compat"]
@@ -18,7 +18,7 @@ migrations_dir = "migrations"
 [vars]
 NODE_ENV = "production"
 ADMIN_NAME = "BonDhu Bitto Admin"
-APP_URL = "https://bondhu-bitto.YOUR-SUBDOMAIN.workers.dev"
+APP_URL = "https://bondhu-bitto-nov.abdullhamoon61780.workers.dev"
 WHATSAPP_NUMBER = ""
 
 [observability]
