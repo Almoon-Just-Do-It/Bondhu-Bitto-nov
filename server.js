@@ -98,6 +98,31 @@ CREATE TABLE IF NOT EXISTS emergency_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_notices_created ON notices(created_at);
 CREATE INDEX IF NOT EXISTS idx_emergency_status ON emergency_messages(status,created_at);
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  actor_id INTEGER REFERENCES users(id),
+  actor_name TEXT NOT NULL DEFAULT '',
+  actor_email TEXT NOT NULL DEFAULT '',
+  actor_role TEXT NOT NULL DEFAULT 'anonymous',
+  actor_source TEXT NOT NULL DEFAULT 'session',
+  target_user_id INTEGER REFERENCES users(id),
+  target_label TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'general',
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  status INTEGER NOT NULL DEFAULT 200,
+  outcome TEXT NOT NULL DEFAULT 'success',
+  ip TEXT NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT '',
+  details TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action, id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category, id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_outcome ON audit_logs(outcome, id DESC);
 `);
 const userColumns = new Set(db.pragma("table_info(users)").map(column => column.name));
 for (const [column, definition] of [
@@ -168,6 +193,20 @@ const clean = (v, max=200) => String(v ?? "").trim().slice(0,max);
 const validMonth = v => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(v));
 const validDate = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v)) && !Number.isNaN(Date.parse(v));
 const emailOk = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+const strongPasswordIssue = (password, { email = "", name = "" } = {}) => {
+  const value = String(password ?? "");
+  if (value.length < 12) return "Password must be at least 12 characters.";
+  if (value.length > 128) return "Password must be at most 128 characters.";
+  if (!/[a-z]/.test(value)) return "Password must include a lowercase letter.";
+  if (!/[A-Z]/.test(value)) return "Password must include an uppercase letter.";
+  if (!/[0-9]/.test(value)) return "Password must include a number.";
+  if (!/[^A-Za-z0-9]/.test(value)) return "Password must include a symbol.";
+  const lower = value.toLowerCase(), emailLocal = String(email).split("@")[0].toLowerCase();
+  if (emailLocal.length >= 3 && lower.includes(emailLocal)) return "Password must not contain your email address.";
+  const nameParts = String(name).toLowerCase().split(/\s+/).filter(part => part.length >= 3);
+  if (nameParts.some(part => lower.includes(part))) return "Password must not contain your name.";
+  return "";
+};
 const imageMimes = new Set(["image/jpeg","image/png","image/webp"]);
 const fileMimes = new Set(["application/pdf","text/plain","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document"]);
 const parseDataUpload = (data, allowedMimes, maxBytes) => {
@@ -187,12 +226,116 @@ const parseProfileImage = value => {
   return image.length<=650*1024 && image.toString("base64")===match[1] ? value : null;
 };
 
+const AUDIT_SKIP_PATHS = new Set(["/api/activity-log"]);
+const AUDIT_ROUTE_RULES = [
+  { method: "POST", pattern: /^\/api\/login$/, action: "user.login", category: "authentication" },
+  { method: "POST", pattern: /^\/api\/password\/forgot$/, action: "password.forgot_requested", category: "authentication" },
+  { method: "POST", pattern: /^\/api\/password\/reset$/, action: "password.reset_completed", category: "authentication" },
+  { method: "POST", pattern: /^\/api\/logout$/, action: "user.logout", category: "authentication" },
+  { method: "PATCH", pattern: /^\/api\/profile$/, action: "profile.updated", category: "profile" },
+  { method: "POST", pattern: /^\/api\/notices$/, action: "notice.created", category: "notice" },
+  { method: "DELETE", pattern: /^\/api\/notices\/[^/]+$/, action: "notice.deleted", category: "notice" },
+  { method: "POST", pattern: /^\/api\/emergency$/, action: "emergency.sent", category: "emergency" },
+  { method: "PATCH", pattern: /^\/api\/emergency\/[^/]+\/resolve$/, action: "emergency.resolved", category: "emergency" },
+  { method: "POST", pattern: /^\/api\/members$/, action: "member.created", category: "member" },
+  { method: "GET", pattern: /^\/api\/members\/[^/]+\/profile$/, action: "member.profile_viewed", category: "member" },
+  { method: "PATCH", pattern: /^\/api\/members\/[^/]+\/profile$/, action: "member.profile_updated", category: "member" },
+  { method: "PATCH", pattern: /^\/api\/members\/[^/]+\/status$/, action: "member.status_changed", category: "member" },
+  { method: "POST", pattern: /^\/api\/members\/[^/]+\/reset-password$/, action: "member.password_reset", category: "member" },
+  { method: "POST", pattern: /^\/api\/payments$/, action: "payment.created", category: "payment" },
+  { method: "POST", pattern: /^\/api\/payments\/[^/]+\/approve$/, action: "payment.approved", category: "payment" },
+  { method: "PATCH", pattern: /^\/api\/payments\/[^/]+$/, action: "payment.updated", category: "payment" },
+  { method: "DELETE", pattern: /^\/api\/payments\/[^/]+$/, action: "payment.deleted", category: "payment" },
+  { method: "GET", pattern: /^\/api\/report\.csv$/, action: "report.exported", category: "report" }
+];
+function auditRequestInfo(method, path) {
+  const match = AUDIT_ROUTE_RULES.find(rule => (!rule.method || rule.method === method) && rule.pattern.test(path));
+  return match
+    ? { action: match.action, category: match.category, method, path, details: {} }
+    : { action: `${method.toLowerCase()}.request`, category: method === "GET" ? "read" : "write", method, path, details: {} };
+}
+function auditActor(req, user, source = "session") {
+  if (!user || !req.audit) return;
+  req.audit.actor = {
+    actor_id: Number(user.id) || null,
+    actor_name: clean(user.name, 100),
+    actor_email: clean(user.email, 254).toLowerCase(),
+    actor_role: clean(user.role, 20) || "anonymous",
+    actor_source: clean(source, 40)
+  };
+}
+function auditFailure(req, reason, details = {}) {
+  if (!req.audit) return;
+  req.audit.outcome = "failure";
+  req.audit.details = { ...req.audit.details, reason, ...details };
+}
+const parseAuditDetails = value => {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch { return {}; }
+};
+app.use("/api", (req, res, next) => {
+  const path = clean(req.originalUrl.split("?")[0], 255);
+  req.audit = { ...auditRequestInfo(req.method, path), created_at: new Date().toISOString(), actor: null, target_user_id: null, target_label: "", outcome: null };
+  res.on("finish", () => {
+    if (AUDIT_SKIP_PATHS.has(path)) return;
+    const status = res.statusCode;
+    const actor = req.audit.actor || (req.user
+      ? {
+          actor_id: Number(req.user.id) || null,
+          actor_name: clean(req.user.name, 100),
+          actor_email: clean(req.user.email, 254).toLowerCase(),
+          actor_role: clean(req.user.role, 20) || "anonymous",
+          actor_source: "session"
+        }
+      : { actor_id: null, actor_name: "", actor_email: "", actor_role: "anonymous", actor_source: "anonymous" });
+    const outcome = req.audit.outcome || (status >= 200 && status < 300 ? "success" : "failure");
+    const ip = clean(req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.ip, 100);
+    const userAgent = clean(req.headers["user-agent"], 300);
+    try {
+      db.prepare(`INSERT INTO audit_logs(created_at,actor_id,actor_name,actor_email,actor_role,actor_source,target_user_id,target_label,action,category,method,path,status,outcome,ip,user_agent,details)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(
+          req.audit.created_at,
+          actor.actor_id || null,
+          actor.actor_name || "",
+          actor.actor_email || "",
+          actor.actor_role || "anonymous",
+          actor.actor_source || "session",
+          req.audit.target_user_id || null,
+          req.audit.target_label || "",
+          req.audit.action,
+          req.audit.category,
+          req.audit.method,
+          req.audit.path,
+          status,
+          outcome,
+          ip,
+          userAgent,
+          JSON.stringify(req.audit.details || {}).slice(0, 8000)
+        );
+    } catch (error) {
+      console.error("Audit log write failed:", error.message);
+    }
+  });
+  next();
+});
+
 app.post("/api/login", loginLimiter, (req,res) => {
   const email = clean(req.body.email,254).toLowerCase();
   const password = String(req.body.password || "");
+  req.audit.details = { submitted_email: email || "invalid" };
   const user = db.prepare("SELECT * FROM users WHERE email=?").get(email);
-  if (!user || !user.active || !bcrypt.compareSync(password,user.password_hash))
+  if (!user || !user.active || !bcrypt.compareSync(password,user.password_hash)) {
+    if (user) auditActor(req, user, "login_attempt");
+    auditFailure(req, "invalid_credentials");
     return res.status(401).json({error:"Email or password is incorrect."});
+  }
+  auditActor(req, user, "login");
+  req.audit.target_user_id = user.id;
+  req.audit.target_label = user.email;
+  req.audit.details.reason = "success";
   const token = jwt.sign({id:user.id}, SECRET, {expiresIn:"12h"});
   res.cookie("bb_session", token, {httpOnly:true, sameSite:"strict", secure:process.env.NODE_ENV==="production", maxAge:12*60*60*1000});
   res.json({user:{id:user.id,name:user.name,email:user.email,role:user.role,account_no:user.account_no}});
@@ -246,7 +389,18 @@ app.post("/api/password/reset", passwordResetLimiter, (req,res) => {
   if(!changePassword()) return res.status(400).json({error:"This password reset link is invalid or has expired."});
   res.json({ok:true});
 });
-app.post("/api/logout", (req,res) => { res.clearCookie("bb_session",{httpOnly:true,sameSite:"strict",secure:process.env.NODE_ENV==="production"}); res.json({ok:true}); });
+app.post("/api/logout", (req,res) => {
+  const token = req.cookies.bb_session;
+  if (token) {
+    try {
+      const payload = jwt.verify(token, SECRET);
+      const user = db.prepare("SELECT id,name,email,role FROM users WHERE id=?").get(payload.id);
+      if (user) auditActor(req, user, "session_cookie");
+    } catch { req.audit.details.reason = "expired_or_invalid_session"; }
+  }
+  res.clearCookie("bb_session",{httpOnly:true,sameSite:"strict",secure:process.env.NODE_ENV==="production"});
+  res.json({ok:true});
+});
 app.get("/api/me", auth, (req,res) => res.json({user:req.user}));
 app.get("/api/profile", auth, (req,res) => {
   const profile=db.prepare("SELECT id,name,email,phone,account_no,father_name,mother_name,nominee_name,nid,nominee_nid,profile_photo,nid_photo,nominee_nid_photo,own_signature,nominee_signature FROM users WHERE id=?").get(req.user.id);
@@ -452,6 +606,30 @@ app.patch("/api/members/:id/status", auth, adminOnly, (req,res) => {
   if (!info.changes) return res.status(404).json({error:"Member not found."});
   res.json({ok:true});
 });
+app.post("/api/members/:id/reset-password", auth, adminOnly, (req,res) => {
+  const memberId=Number(req.params.id);
+  const member=db.prepare("SELECT id,name,email,account_no FROM users WHERE id=? AND role='member'").get(memberId);
+  if (!member) {
+    auditFailure(req,"member_not_found",{member_id:memberId});
+    return res.status(404).json({error:"Member not found."});
+  }
+  const issue=strongPasswordIssue(req.body.password, member);
+  if (issue) {
+    auditFailure(req,"password_policy_failed",{reason_detail:issue});
+    return res.status(400).json({error:issue});
+  }
+  const hash=bcrypt.hashSync(req.body.password,12);
+  db.transaction(()=>{
+    db.prepare("UPDATE users SET password_hash=? WHERE id=? AND role='member'").run(hash,memberId);
+    db.prepare("DELETE FROM password_resets WHERE user_id=?").run(memberId);
+  })();
+  req.audit.target_user_id=memberId;
+  req.audit.target_label=`${member.name} (${member.account_no||memberId})`;
+  req.audit.details.reason="password_reset_by_admin";
+  req.audit.details.user_id=memberId;
+  req.audit.details.email=member.email;
+  res.json({ok:true});
+});
 app.get("/api/payments", auth, (req,res) => {
   const sql=`SELECT p.*,u.name member_name,u.email member_email,u.phone member_phone FROM payments p JOIN users u ON u.id=p.member_id`;
   const rows=req.user.role==="admin"
@@ -506,6 +684,61 @@ app.get("/api/report.csv", auth, adminOnly, (req,res) => {
   res.setHeader("Content-Type","text/csv; charset=utf-8");
   res.setHeader("Content-Disposition",'attachment; filename="bondhu-bitto-report.csv"');
   res.send("\ufeff"+csv);
+});
+
+app.get("/api/activity-log", auth, adminOnly, (req,res) => {
+  const user = req.user;
+  const query = req.query;
+  const limit = Math.min(Math.max(Number(query.limit) || 100, 1), 500);
+  const where = [];
+  const params = [];
+  if (user.role !== "admin") {
+    where.push("actor_id=?"); params.push(user.id);
+  } else if (/^\d+$/.test(String(query.user || ""))) {
+    where.push("actor_id=?"); params.push(Number(query.user));
+  }
+  const action = clean(query.action, 80);
+  const category = clean(query.category, 40);
+  const outcome = clean(query.outcome, 20);
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(String(query.from || "")) ? String(query.from) : "";
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(String(query.to || "")) ? String(query.to) : "";
+  const search = clean(query.search, 100);
+  if (action) { where.push("action=?"); params.push(action); }
+  if (category) { where.push("category=?"); params.push(category); }
+  if (outcome === "success" || outcome === "failure") { where.push("outcome=?"); params.push(outcome); }
+  if (from) { where.push("created_at>=?"); params.push(`${from}T00:00:00.000Z`); }
+  if (to) { where.push("created_at<=?"); params.push(`${to}T23:59:59.999Z`); }
+  if (search) {
+    const term = `%${search}%`;
+    where.push("(action LIKE ? OR actor_name LIKE ? OR actor_email LIKE ? OR target_label LIKE ? OR details LIKE ?)");
+    params.push(term, term, term, term, term);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const rows = db.prepare(`SELECT id,created_at,actor_id,actor_name,actor_email,actor_role,actor_source,target_user_id,target_label,action,category,method,path,status,outcome,ip,user_agent,details
+    FROM audit_logs ${whereSql} ORDER BY id DESC LIMIT ?`).all(...params, limit);
+  const total = db.prepare(`SELECT COUNT(*) count FROM audit_logs ${whereSql}`).get(...params).count;
+  const scopeWhere = user.role === "admin" ? "" : "WHERE actor_id=?";
+  const scopeParams = user.role === "admin" ? [] : [user.id];
+  const today = new Date().toISOString().slice(0, 10);
+  const stats = db.prepare(`SELECT COUNT(*) total,COALESCE(SUM(CASE WHEN substr(created_at,1,10)=? THEN 1 ELSE 0 END),0) today,COALESCE(SUM(CASE WHEN outcome='failure' THEN 1 ELSE 0 END),0) failures,COUNT(DISTINCT actor_id) actors FROM audit_logs ${scopeWhere}`).get(today, ...scopeParams);
+  const actions = db.prepare(`SELECT DISTINCT action FROM audit_logs ${scopeWhere} ORDER BY action`).all(...scopeParams).map(r => r.action);
+  const categories = db.prepare(`SELECT DISTINCT category FROM audit_logs ${scopeWhere} ORDER BY category`).all(...scopeParams).map(r => r.category);
+  const users = user.role === "admin"
+    ? db.prepare("SELECT id,name,email,account_no FROM users ORDER BY name COLLATE NOCASE").all()
+    : [{ id: user.id, name: user.name, email: user.email, account_no: user.account_no }];
+  res.json({
+    logs: rows.map(row => ({ ...row, details: parseAuditDetails(row.details) })),
+    total,
+    limit,
+    stats: {
+      total: Number(stats.total) || 0,
+      today: Number(stats.today) || 0,
+      failures: Number(stats.failures) || 0,
+      actors: Number(stats.actors) || 0
+    },
+    filters: { actions, categories, users },
+    scope: user.role === "admin" ? "all" : "own"
+  });
 });
 
 app.get("*",(req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));

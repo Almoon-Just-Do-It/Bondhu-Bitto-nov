@@ -6,11 +6,14 @@ import bcrypt from "bcryptjs";
 const app = new Hono();
 
 const SESSION_COOKIE = "bb_session";
-const SESSION_SECONDS = 12 * 60 * 60;
+const SESSION_SECONDS = 20 * 60;
 const PASSWORD_ITERATIONS = 100000;
+const PASSWORD_MIN_LENGTH = 12;
+const PASSWORD_MAX_LENGTH = 128;
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_RE = /^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+const RESERVED_EMAIL_TLDS = new Set(["local", "localhost", "invalid", "test", "example"]);
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const FILE_MIMES = new Set([
   "application/pdf",
@@ -33,9 +36,47 @@ const secret = (env) => {
 const clean = (value, max = 200) => String(value ?? "").trim().slice(0, max);
 const validMonth = (value) => MONTH_RE.test(String(value));
 const validDate = (value) => DATE_RE.test(String(value)) && !Number.isNaN(Date.parse(value));
-const emailOk = (value) => EMAIL_RE.test(value);
 const nowIso = () => new Date().toISOString();
 const currentMonth = () => nowIso().slice(0, 7);
+
+function normalizeEmail(value) {
+  const email = String(value ?? "").trim().toLowerCase();
+  if (!email || email.length > 254 || !EMAIL_RE.test(email)) return "";
+  const at = email.lastIndexOf("@");
+  if (at < 1 || at > 64) return "";
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (local.length > 64 || local.startsWith(".") || local.endsWith(".") || local.includes("..")) return "";
+  const labels = domain.split(".");
+  if (labels.length < 2 || labels.some((label) => !label || label.length > 63 || label.startsWith("-") || label.endsWith("-"))) return "";
+  const tld = labels[labels.length - 1];
+  if (RESERVED_EMAIL_TLDS.has(tld)) return "";
+  if (!/^[a-z]{2,63}$/i.test(tld) && !/^xn--[a-z0-9-]{2,59}$/i.test(tld)) return "";
+  return email;
+}
+
+function passwordIssue(password, { email = "", name = "" } = {}) {
+  if (typeof password !== "string" || password.length < PASSWORD_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
+  }
+  if (password.length > PASSWORD_MAX_LENGTH) {
+    return `Password must be at most ${PASSWORD_MAX_LENGTH} characters.`;
+  }
+  if (!/[a-z]/.test(password)) return "Password must include a lowercase letter.";
+  if (!/[A-Z]/.test(password)) return "Password must include an uppercase letter.";
+  if (!/[0-9]/.test(password)) return "Password must include a number.";
+  if (!/[^A-Za-z0-9]/.test(password)) return "Password must include a symbol.";
+  const lower = password.toLowerCase();
+  const emailLocal = String(email).split("@")[0].toLowerCase();
+  if (emailLocal.length >= 3 && lower.includes(emailLocal)) {
+    return "Password must not contain your email address.";
+  }
+  const nameParts = String(name).toLowerCase().split(/\s+/).filter((part) => part.length >= 3);
+  if (nameParts.some((part) => lower.includes(part))) {
+    return "Password must not contain your name.";
+  }
+  return "";
+}
 
 function hex(bytes) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -170,19 +211,142 @@ function rateLimit(name, limit, windowMs) {
   };
 }
 
+const AUDIT_DETAILS_LIMIT = 8000;
+const AUDIT_SKIP_PATHS = new Set(["/api/activity-log"]);
+const AUDIT_ROUTE_RULES = [
+  { method: "POST", pattern: /^\/api\/login$/, action: "user.login", category: "authentication" },
+  { method: "POST", pattern: /^\/api\/password\/forgot$/, action: "password.forgot_requested", category: "authentication" },
+  { method: "POST", pattern: /^\/api\/password\/reset$/, action: "password.reset_completed", category: "authentication" },
+  { method: "POST", pattern: /^\/api\/logout$/, action: "user.logout", category: "authentication" },
+  { method: "PATCH", pattern: /^\/api\/profile$/, action: "profile.updated", category: "profile" },
+  { method: "POST", pattern: /^\/api\/notices$/, action: "notice.created", category: "notice" },
+  { method: "DELETE", pattern: /^\/api\/notices\/[^/]+$/, action: "notice.deleted", category: "notice" },
+  { method: "POST", pattern: /^\/api\/emergency$/, action: "emergency.sent", category: "emergency" },
+  { method: "PATCH", pattern: /^\/api\/emergency\/[^/]+\/resolve$/, action: "emergency.resolved", category: "emergency" },
+  { method: "POST", pattern: /^\/api\/members$/, action: "member.created", category: "member" },
+  { method: "GET", pattern: /^\/api\/members\/[^/]+\/profile$/, action: "member.profile_viewed", category: "member" },
+  { method: "GET", pattern: /^\/api\/members\/[^/]+\/ledger$/, action: "member.ledger_viewed", category: "member" },
+  { method: "PATCH", pattern: /^\/api\/members\/[^/]+\/profile$/, action: "member.profile_updated", category: "member" },
+  { method: "PATCH", pattern: /^\/api\/members\/[^/]+\/status$/, action: "member.status_changed", category: "member" },
+  { method: "POST", pattern: /^\/api\/members\/[^/]+\/reset-password$/, action: "member.password_reset", category: "member" },
+  { method: "POST", pattern: /^\/api\/payments$/, action: "payment.created", category: "payment" },
+  { method: "POST", pattern: /^\/api\/payments\/[^/]+\/approve$/, action: "payment.approved", category: "payment" },
+  { method: "PATCH", pattern: /^\/api\/payments\/[^/]+$/, action: "payment.updated", category: "payment" },
+  { method: "DELETE", pattern: /^\/api\/payments\/[^/]+$/, action: "payment.deleted", category: "payment" },
+  { method: "GET", pattern: /^\/api\/report\.csv$/, action: "report.exported", category: "report" }
+];
+
+function setAudit(c, patch = {}) {
+  const current = c.get("audit") || { details: {} };
+  const details = patch.details ? { ...(current.details || {}), ...patch.details } : current.details;
+  c.set("audit", { ...current, ...patch, details: details || {} });
+}
+
+function auditRequestInfo(c) {
+  const method = c.req.method;
+  const path = clean(c.req.path, 255);
+  const match = AUDIT_ROUTE_RULES.find((rule) => (!rule.method || rule.method === method) && rule.pattern.test(path));
+  const action = match ? match.action : `${method.toLowerCase()}.request`;
+  const category = match ? match.category : method === "GET" ? "read" : "write";
+  return { action, category, method, path, details: {} };
+}
+
+function auditActor(c, user, source = "session") {
+  if (!user) return;
+  setAudit(c, {
+    actor: {
+      actor_id: Number(user.id) || null,
+      actor_name: clean(user.name, 100),
+      actor_email: clean(user.email, 254).toLowerCase(),
+      actor_role: clean(user.role, 20) || "anonymous",
+      actor_source: clean(source, 40)
+    }
+  });
+}
+
+function auditTarget(c, id, label) {
+  setAudit(c, { target_user_id: Number(id) || null, target_label: clean(label, 160) });
+}
+
+function auditFailure(c, reason, details = {}) {
+  setAudit(c, { outcome: "failure", details: { reason, ...details } });
+}
+
+function parseAuditDetails(value) {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeAuditLog(c) {
+  const audit = c.get("audit");
+  if (!audit || AUDIT_SKIP_PATHS.has(c.req.path)) return;
+  const status = Number(audit.status || c.res?.status) || 500;
+  const sessionUser = c.get("user");
+  const actor = audit.actor || (sessionUser
+    ? {
+        actor_id: Number(sessionUser.id) || null,
+        actor_name: clean(sessionUser.name, 100),
+        actor_email: clean(sessionUser.email, 254).toLowerCase(),
+        actor_role: clean(sessionUser.role, 20) || "anonymous",
+        actor_source: "session"
+      }
+    : {
+        actor_id: null,
+        actor_name: "",
+        actor_email: "",
+        actor_role: "anonymous",
+        actor_source: "anonymous"
+      });
+  const outcome = audit.outcome || (status >= 200 && status < 300 ? "success" : "failure");
+  const ip = clean(c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || "local", 100);
+  const userAgent = clean(c.req.header("user-agent"), 300);
+  const details = JSON.stringify(audit.details || {}).slice(0, AUDIT_DETAILS_LIMIT);
+  try {
+    await c.env.DB.prepare(`INSERT INTO audit_logs(created_at,actor_id,actor_name,actor_email,actor_role,actor_source,target_user_id,target_label,action,category,method,path,status,outcome,ip,user_agent,details)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(
+        audit.created_at || nowIso(),
+        actor.actor_id || null,
+        actor.actor_name || "",
+        actor.actor_email || "",
+        actor.actor_role || "anonymous",
+        actor.actor_source || "session",
+        audit.target_user_id || null,
+        audit.target_label || "",
+        audit.action,
+        audit.category,
+        audit.method,
+        audit.path,
+        status,
+        outcome,
+        ip,
+        userAgent,
+        details
+      )
+      .run();
+  } catch (error) {
+    console.error("Audit log write failed:", error.message);
+  }
+}
+
 async function ensureAdmin(env) {
   if (!adminReady) {
     adminReady = (async () => {
-      const email = clean(env.ADMIN_EMAIL || "admin@bondhubitto.local", 254).toLowerCase();
+      const email = normalizeEmail(env.ADMIN_EMAIL);
+      if (!email) throw new Error("Set ADMIN_EMAIL secret to a valid email address.");
       const existing = await env.DB.prepare("SELECT id FROM users WHERE email=?").bind(email).first();
       if (existing) return;
+      const name = clean(env.ADMIN_NAME || "BonDhu Bitto Admin", 100);
       const password = String(env.ADMIN_PASSWORD || "");
-      if (password.length < 10) {
-        throw new Error("Set ADMIN_PASSWORD secret to at least 10 characters.");
-      }
+      const issue = passwordIssue(password, { email, name });
+      if (issue) throw new Error(`Set ADMIN_PASSWORD secret. ${issue}`);
       const hash = await hashPassword(password);
       await env.DB.prepare("INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?,'admin')")
-        .bind(clean(env.ADMIN_NAME || "BonDhu Bitto Admin", 100), email, hash)
+        .bind(name, email, hash)
         .run();
     })().catch((error) => {
       adminReady = null;
@@ -206,6 +370,11 @@ const auth = async (c, next) => {
     .bind(payload.id)
     .first();
   if (!user || !user.active) return c.json({ error: "Account unavailable." }, 401);
+  const now = Math.floor(Date.now() / 1000);
+  if (!payload.exp || payload.exp - now < SESSION_SECONDS / 2) {
+    const token = await sign({ id: user.id, exp: now + SESSION_SECONDS }, secret(c.env));
+    setCookie(c, SESSION_COOKIE, token, cookieOptions(c));
+  }
   c.set("user", user);
   await next();
 };
@@ -218,13 +387,37 @@ const adminOnly = async (c, next) => {
 };
 
 app.use("/api/*", async (c, next) => {
+  c.set("audit", {
+    ...auditRequestInfo(c),
+    created_at: nowIso(),
+    status: null,
+    outcome: null,
+    actor: null,
+    target_user_id: null,
+    target_label: ""
+  });
   const length = Number(c.req.header("content-length") || 0);
-  if (length > 12 * 1024 * 1024) return c.json({ error: "Request body is too large." }, 413);
-  await next();
-  c.header("X-Content-Type-Options", "nosniff");
-  c.header("X-Frame-Options", "SAMEORIGIN");
-  c.header("Referrer-Policy", "no-referrer");
-  c.header("Cross-Origin-Opener-Policy", "same-origin");
+  if (length > 12 * 1024 * 1024) {
+    setAudit(c, { status: 413, outcome: "failure", details: { reason: "request_body_too_large" } });
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("X-Frame-Options", "SAMEORIGIN");
+    c.header("Referrer-Policy", "no-referrer");
+    c.header("Cross-Origin-Opener-Policy", "same-origin");
+    await writeAuditLog(c);
+    return c.json({ error: "Request body is too large." }, 413);
+  }
+  try {
+    await next();
+  } catch (error) {
+    setAudit(c, { status: 500, outcome: "failure", details: { reason: "unhandled_error" } });
+    throw error;
+  } finally {
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("X-Frame-Options", "SAMEORIGIN");
+    c.header("Referrer-Policy", "no-referrer");
+    c.header("Cross-Origin-Opener-Policy", "same-origin");
+    await writeAuditLog(c);
+  }
 });
 
 app.post("/api/login", rateLimit("login", 10, 15 * 60 * 1000), async (c) => {
@@ -235,12 +428,37 @@ app.post("/api/login", rateLimit("login", 10, 15 * 60 * 1000), async (c) => {
     return c.json({ error: error.message }, 500);
   }
   const body = await readBody(c);
-  const email = clean(body.email, 254).toLowerCase();
+  const email = normalizeEmail(body.email);
   const password = String(body.password || "");
+  setAudit(c, { details: { submitted_email: clean(body.email, 254).toLowerCase() || "invalid" } });
+  if (!email) {
+    auditFailure(c, "invalid_email");
+    return c.json({ error: "Enter a valid email address." }, 400);
+  }
+  if (!password || password.length > PASSWORD_MAX_LENGTH) {
+    auditFailure(c, "missing_or_invalid_password");
+    return c.json({ error: "Enter your email and password." }, 400);
+  }
   const user = await c.env.DB.prepare("SELECT * FROM users WHERE email=?").bind(email).first();
-  if (!user || !user.active || !(await verifyPassword(password, user.password_hash))) {
+  const passwordValid = user ? await verifyPassword(password, user.password_hash) : false;
+  if (user) auditActor(c, user, "login_attempt");
+  if (!user || !user.active || !passwordValid) {
+    auditFailure(c, "invalid_credentials");
     return c.json({ error: "Email or password is incorrect." }, 401);
   }
+  let passwordHashUpgraded = false;
+  if (!user.password_hash.startsWith(`pbkdf2$${PASSWORD_ITERATIONS}$`)) {
+    try {
+      const hash = await hashPassword(password);
+      await c.env.DB.prepare("UPDATE users SET password_hash=? WHERE id=?").bind(hash, user.id).run();
+      passwordHashUpgraded = true;
+    } catch (error) {
+      console.error("Password hash upgrade failed:", error.message);
+    }
+  }
+  auditActor(c, user, "login");
+  auditTarget(c, user.id, user.email);
+  setAudit(c, { details: { reason: "success", password_hash_upgraded: passwordHashUpgraded } });
   const token = await sign(
     { id: user.id, exp: Math.floor(Date.now() / 1000) + SESSION_SECONDS },
     secret(c.env)
@@ -272,14 +490,22 @@ async function sendResetEmail(env, { to, name, resetUrl }) {
 }
 
 app.post("/api/password/forgot", rateLimit("reset", 5, 15 * 60 * 1000), async (c) => {
+  const body = await readBody(c);
+  const email = normalizeEmail(body.email);
+  setAudit(c, { details: { submitted_email: clean(body.email, 254).toLowerCase() || "invalid", matched: false } });
   if (!c.env.RESEND_API_KEY || !(c.env.MAIL_FROM || c.env.SMTP_FROM)) {
+    auditFailure(c, "email_not_configured");
     return c.json({ error: "Password recovery email is not configured. Please contact the administrator." }, 503);
   }
-  const body = await readBody(c);
-  const email = clean(body.email, 254).toLowerCase();
-  if (!emailOk(email)) return c.json({ error: "Enter a valid email address." }, 400);
+  if (!email) {
+    auditFailure(c, "invalid_email");
+    return c.json({ error: "Enter a valid email address." }, 400);
+  }
   const user = await c.env.DB.prepare("SELECT id,name,email FROM users WHERE email=? AND active=1").bind(email).first();
   if (user) {
+    auditActor(c, user, "password_reset_request");
+    auditTarget(c, user.id, user.email);
+    setAudit(c, { details: { matched: true, reset_record_created: true, email_sent: false } });
     const now = Date.now();
     const token = randomToken();
     const tokenHash = await sha256Hex(token);
@@ -298,13 +524,16 @@ app.post("/api/password/forgot", rateLimit("reset", 5, 15 * 60 * 1000), async (c
       resetUrl = url.toString();
     } catch {
       await c.env.DB.prepare("DELETE FROM password_resets WHERE token_hash=?").bind(tokenHash).run();
+      auditFailure(c, "reset_url_unavailable", { matched: true, reset_record_created: false });
       return c.json({ error: "Password recovery is not available. Please contact the administrator." }, 503);
     }
     try {
       const sent = await sendResetEmail(c.env, { to: user.email, name: user.name, resetUrl });
       if (!sent) throw new Error("Email delivery failed");
+      setAudit(c, { details: { email_sent: true } });
     } catch (error) {
       await c.env.DB.prepare("DELETE FROM password_resets WHERE token_hash=?").bind(tokenHash).run();
+      auditFailure(c, "email_delivery_failed", { matched: true, reset_record_created: false, email_sent: false });
       console.error("Password reset email delivery failed:", error.message);
     }
   }
@@ -315,26 +544,50 @@ app.post("/api/password/reset", rateLimit("reset", 5, 15 * 60 * 1000), async (c)
   const body = await readBody(c);
   const token = clean(body.token, 128);
   const password = String(body.password || "");
-  if (password.length < 10) return c.json({ error: "Password must be at least 10 characters." }, 400);
   const tokenHash = await sha256Hex(token);
   const now = Date.now();
   const reset = await c.env.DB
-    .prepare("SELECT user_id FROM password_resets WHERE token_hash=? AND expires_at>? AND used_at IS NULL")
+    .prepare("SELECT pr.user_id,u.email,u.name,u.role FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE pr.token_hash=? AND pr.expires_at>? AND pr.used_at IS NULL")
     .bind(tokenHash, now)
     .first();
-  if (!reset) return c.json({ error: "This password reset link is invalid or has expired." }, 400);
+  if (!reset) {
+    auditFailure(c, "invalid_or_expired_token");
+    return c.json({ error: "This password reset link is invalid or has expired." }, 400);
+  }
+  auditActor(c, { id: reset.user_id, email: reset.email, name: reset.name, role: reset.role }, "password_reset_token");
+  auditTarget(c, reset.user_id, reset.email);
+  const issue = passwordIssue(password, reset);
+  if (issue) {
+    auditFailure(c, "password_policy_failed", { reason_detail: issue });
+    return c.json({ error: issue }, 400);
+  }
   const hash = await hashPassword(password);
   const results = await c.env.DB.batch([
     c.env.DB.prepare("UPDATE users SET password_hash=? WHERE id=? AND active=1").bind(hash, reset.user_id),
     c.env.DB.prepare("DELETE FROM password_resets WHERE user_id=?").bind(reset.user_id)
   ]);
   if (!results[0].meta.changes) {
+    auditFailure(c, "invalid_or_expired_token");
     return c.json({ error: "This password reset link is invalid or has expired." }, 400);
   }
+  setAudit(c, { details: { reason: "password_changed", reset_rows_deleted: results[1].meta.changes } });
   return c.json({ ok: true });
 });
 
-app.post("/api/logout", (c) => {
+app.post("/api/logout", async (c) => {
+  const token = getCookie(c, SESSION_COOKIE);
+  if (token) {
+    try {
+      const payload = await verify(token, secret(c.env), "HS256");
+      const user = await c.env.DB
+        .prepare("SELECT id,name,email,role FROM users WHERE id=?")
+        .bind(payload.id)
+        .first();
+      if (user) auditActor(c, user, "session_cookie");
+    } catch {
+      setAudit(c, { details: { reason: "expired_or_invalid_session" } });
+    }
+  }
   deleteCookie(c, SESSION_COOKIE, { ...cookieOptions(c), maxAge: 0 });
   return c.json({ ok: true });
 });
@@ -351,6 +604,15 @@ app.get("/api/profile", auth, async (c) => {
 
 app.patch("/api/profile", auth, async (c) => {
   const body = await readBody(c);
+  const imageFields = ["profilePhoto", "nidPhoto", "nomineeNidPhoto", "ownSignature", "nomineeSignature"];
+  setAudit(c, {
+    target_user_id: c.get("user").id,
+    target_label: clean(c.get("user").email, 254),
+    details: {
+      fields: Object.keys(body).filter((key) => !imageFields.includes(key)).sort().join(","),
+      images: imageFields.filter((key) => body[key] !== undefined && body[key] !== null).join(",")
+    }
+  });
   const name = clean(body.name, 100);
   const fatherName = clean(body.fatherName, 100);
   const motherName = clean(body.motherName, 100);
@@ -369,9 +631,13 @@ app.patch("/api/profile", auth, async (c) => {
     (body.ownSignature !== undefined && body.ownSignature !== null && ownSignature === null) ||
     (body.nomineeSignature !== undefined && body.nomineeSignature !== null && nomineeSignature === null)
   ) {
+    auditFailure(c, "invalid_image");
     return c.json({ error: "Profile photos, NID images and signatures must be JPEG images smaller than 650 KB each." }, 400);
   }
-  if (!name) return c.json({ error: "Enter your full name." }, 400);
+  if (!name) {
+    auditFailure(c, "missing_name");
+    return c.json({ error: "Enter your full name." }, 400);
+  }
   await c.env.DB
     .prepare("UPDATE users SET name=?,father_name=?,mother_name=?,nominee_name=?,nid=?,nominee_nid=?,profile_photo=COALESCE(?,profile_photo),nid_photo=COALESCE(?,nid_photo),nominee_nid_photo=COALESCE(?,nominee_nid_photo),own_signature=COALESCE(?,own_signature),nominee_signature=COALESCE(?,nominee_signature) WHERE id=?")
     .bind(name, fatherName, motherName, nomineeName, nid, nomineeNid, profilePhoto, nidPhoto, nomineeNidPhoto, ownSignature, nomineeSignature, c.get("user").id)
@@ -400,16 +666,39 @@ app.post("/api/notices", auth, adminOnly, async (c) => {
   const text = clean(body.body, 4000);
   const image = body.image ? parseDataUpload(body.image, IMAGE_MIMES, 2 * 1024 * 1024) : null;
   const file = body.file ? parseDataUpload(body.file, FILE_MIMES, 4 * 1024 * 1024) : null;
-  if (!title) return c.json({ error: "Enter a notice title." }, 400);
-  if (!text && !body.image && !body.file) return c.json({ error: "Add notice text, an image, or a file." }, 400);
-  if (body.image && !image) return c.json({ error: "Notice image must be JPEG, PNG or WebP under 2 MB." }, 400);
-  if (body.file && !file) return c.json({ error: "File must be PDF, TXT, DOC or DOCX under 4 MB." }, 400);
+  if (!title) {
+    auditFailure(c, "missing_title");
+    return c.json({ error: "Enter a notice title." }, 400);
+  }
+  if (!text && !body.image && !body.file) {
+    auditFailure(c, "empty_notice");
+    return c.json({ error: "Add notice text, an image, or a file." }, 400);
+  }
+  if (body.image && !image) {
+    auditFailure(c, "invalid_image");
+    return c.json({ error: "Notice image must be JPEG, PNG or WebP under 2 MB." }, 400);
+  }
+  if (body.file && !file) {
+    auditFailure(c, "invalid_file");
+    return c.json({ error: "File must be PDF, TXT, DOC or DOCX under 4 MB." }, 400);
+  }
   const fileName = file ? safeFilename(body.fileName) : null;
+  setAudit(c, {
+    details: {
+      title,
+      body_length: text.length,
+      has_image: Boolean(image),
+      has_file: Boolean(file),
+      file_name: fileName || ""
+    }
+  });
   const info = await c.env.DB
     .prepare("INSERT INTO notices(title,body,image_mime,image_data,file_name,file_mime,file_data,created_by) VALUES(?,?,?,?,?,?,?,?)")
     .bind(title, text, image?.mime || null, image?.bytes || null, fileName, file?.mime || null, file?.bytes || null, c.get("user").id)
     .run();
-  return c.json({ id: info.meta.last_row_id }, 201);
+  const noticeId = info.meta.last_row_id;
+  setAudit(c, { target_label: `Notice #${noticeId}`, details: { notice_id: noticeId } });
+  return c.json({ id: noticeId }, 201);
 });
 
 app.get("/api/notices/:id/image", auth, async (c) => {
@@ -440,8 +729,14 @@ app.get("/api/notices/:id/file", auth, async (c) => {
 });
 
 app.delete("/api/notices/:id", auth, adminOnly, async (c) => {
-  const info = await c.env.DB.prepare("DELETE FROM notices WHERE id=?").bind(Number(c.req.param("id"))).run();
-  if (!info.meta.changes) return c.json({ error: "Notice not found." }, 404);
+  const noticeId = Number(c.req.param("id"));
+  const existing = await c.env.DB.prepare("SELECT title,created_by FROM notices WHERE id=?").bind(noticeId).first();
+  const info = await c.env.DB.prepare("DELETE FROM notices WHERE id=?").bind(noticeId).run();
+  setAudit(c, { details: { notice_id: noticeId, title: existing?.title || "", author_id: existing?.created_by || null } });
+  if (!info.meta.changes) {
+    auditFailure(c, "notice_not_found");
+    return c.json({ error: "Notice not found." }, 404);
+  }
   return c.json({ ok: true });
 });
 
@@ -453,14 +748,30 @@ app.post("/api/emergency", auth, rateLimit("emergency", 3, 15 * 60 * 1000), asyn
   const text = clean(body.body, 2000);
   const image = body.image ? parseDataUpload(body.image, IMAGE_MIMES, 2 * 1024 * 1024) : null;
   const file = body.file ? parseDataUpload(body.file, FILE_MIMES, 4 * 1024 * 1024) : null;
-  if (!text && !body.image && !body.file) return c.json({ error: "Write a message or attach a file." }, 400);
-  if (body.image && !image) return c.json({ error: "Image must be JPEG, PNG or WebP under 2 MB." }, 400);
-  if (body.file && !file) return c.json({ error: "File must be PDF, TXT, DOC or DOCX under 4 MB." }, 400);
+  setAudit(c, {
+    target_user_id: c.get("user").id,
+    target_label: clean(c.get("user").account_no || c.get("user").email, 160),
+    details: { body_length: text.length, has_image: Boolean(image), has_file: Boolean(file), file_name: file ? safeFilename(body.fileName) : "" }
+  });
+  if (!text && !body.image && !body.file) {
+    auditFailure(c, "empty_emergency");
+    return c.json({ error: "Write a message or attach a file." }, 400);
+  }
+  if (body.image && !image) {
+    auditFailure(c, "invalid_image");
+    return c.json({ error: "Image must be JPEG, PNG or WebP under 2 MB." }, 400);
+  }
+  if (body.file && !file) {
+    auditFailure(c, "invalid_file");
+    return c.json({ error: "File must be PDF, TXT, DOC or DOCX under 4 MB." }, 400);
+  }
   const info = await c.env.DB
     .prepare("INSERT INTO emergency_messages(member_id,body,image_mime,image_data,file_name,file_mime,file_data) VALUES(?,?,?,?,?,?,?)")
     .bind(c.get("user").id, text, image?.mime || null, image?.bytes || null, file ? safeFilename(body.fileName) : null, file?.mime || null, file?.bytes || null)
     .run();
-  return c.json({ id: info.meta.last_row_id, status: "new" }, 201);
+  const messageId = info.meta.last_row_id;
+  setAudit(c, { target_label: `Emergency #${messageId}`, details: { message_id: messageId } });
+  return c.json({ id: messageId, status: "new" }, 201);
 });
 
 app.get("/api/emergency", auth, adminOnly, async (c) => {
@@ -500,11 +811,16 @@ app.get("/api/emergency/:id/file", auth, adminOnly, async (c) => {
 });
 
 app.patch("/api/emergency/:id/resolve", auth, adminOnly, async (c) => {
+  const messageId = Number(c.req.param("id"));
   const info = await c.env.DB
     .prepare("UPDATE emergency_messages SET status='resolved',resolved_at=?,resolved_by=? WHERE id=? AND status='new'")
-    .bind(nowIso(), c.get("user").id, Number(c.req.param("id")))
+    .bind(nowIso(), c.get("user").id, messageId)
     .run();
-  if (!info.meta.changes) return c.json({ error: "New emergency message not found." }, 404);
+  setAudit(c, { target_label: `Emergency #${messageId}`, details: { message_id: messageId } });
+  if (!info.meta.changes) {
+    auditFailure(c, "emergency_not_found");
+    return c.json({ error: "New emergency message not found." }, 404);
+  }
   return c.json({ ok: true });
 });
 
@@ -573,6 +889,8 @@ app.get("/api/members", auth, adminOnly, async (c) => {
 });
 
 app.get("/api/members/:id/profile", auth, adminOnly, async (c) => {
+  const memberId = Number(c.req.param("id"));
+  setAudit(c, { target_user_id: memberId, target_label: `Member #${memberId}`, details: { member_id: memberId } });
   const profile = await c.env.DB
     .prepare("SELECT id,account_no,name,email,phone,father_name,mother_name,nominee_name,nid,nominee_nid,profile_photo,nid_photo,nominee_nid_photo,own_signature,nominee_signature FROM users WHERE id=? AND role='member'")
     .bind(Number(c.req.param("id")))
@@ -583,6 +901,7 @@ app.get("/api/members/:id/profile", auth, adminOnly, async (c) => {
 
 app.get("/api/members/:id/ledger", auth, adminOnly, async (c) => {
   const memberId = Number(c.req.param("id"));
+  setAudit(c, { target_user_id: memberId, target_label: `Member #${memberId}`, details: { member_id: memberId } });
   if (!Number.isInteger(memberId) || memberId < 1) return c.json({ error: "Invalid member account." }, 400);
   const member = await c.env.DB
     .prepare("SELECT id,account_no,name,email,phone,active,father_name,mother_name,nominee_name,nid,nominee_nid FROM users WHERE id=? AND role='member'")
@@ -601,8 +920,17 @@ app.get("/api/members/:id/ledger", auth, adminOnly, async (c) => {
 app.patch("/api/members/:id/profile", auth, adminOnly, async (c) => {
   const body = await readBody(c);
   const memberId = Number(c.req.param("id"));
+  const imageFields = ["profilePhoto", "nidPhoto", "nomineeNidPhoto", "ownSignature", "nomineeSignature"];
+  setAudit(c, {
+    target_user_id: memberId,
+    target_label: `Member #${memberId}`,
+    details: {
+      fields: Object.keys(body).filter((key) => !imageFields.includes(key)).sort().join(","),
+      images: imageFields.filter((key) => body[key] !== undefined && body[key] !== null).join(",")
+    }
+  });
   const name = clean(body.name, 100);
-  const email = clean(body.email, 254).toLowerCase();
+  const email = normalizeEmail(body.email);
   const phone = clean(body.phone, 30);
   const fatherName = clean(body.fatherName, 100);
   const motherName = clean(body.motherName, 100);
@@ -620,14 +948,16 @@ app.patch("/api/members/:id/profile", auth, adminOnly, async (c) => {
     if (value !== undefined && value !== null) {
       images[field] = parseProfileImage(value);
       if (images[field] === null) {
+        auditFailure(c, "invalid_image", { field });
         return c.json({ error: "Profile photos, NID images and signatures must be JPEG images smaller than 650 KB each." }, 400);
       }
     } else {
       images[field] = null;
     }
   }
-  if (!Number.isInteger(memberId) || memberId < 1 || !name || !emailOk(email)) {
-    return c.json({ error: "Enter a member name and valid email." }, 400);
+  if (!Number.isInteger(memberId) || memberId < 1 || !name || !email) {
+    auditFailure(c, "invalid_member_details");
+    return c.json({ error: "Enter a member name and a valid email address." }, 400);
   }
   try {
     const info = await c.env.DB
@@ -651,12 +981,14 @@ app.patch("/api/members/:id/profile", auth, adminOnly, async (c) => {
 app.post("/api/members", auth, adminOnly, async (c) => {
   const body = await readBody(c);
   const name = clean(body.name, 100);
-  const email = clean(body.email, 254).toLowerCase();
+  const email = normalizeEmail(body.email);
   const phone = clean(body.phone, 30);
   const password = String(body.password || "");
-  if (!name || !emailOk(email) || password.length < 10) {
-    return c.json({ error: "Enter a name, valid email and a password of at least 10 characters." }, 400);
+  if (!name || !email) {
+    return c.json({ error: "Enter a member name and a valid email address." }, 400);
   }
+  const issue = passwordIssue(password, { email, name });
+  if (issue) return c.json({ error: issue }, 400);
   try {
     const hash = await hashPassword(password);
     const info = await c.env.DB
@@ -666,20 +998,57 @@ app.post("/api/members", auth, adminOnly, async (c) => {
     const id = info.meta.last_row_id;
     const accountNo = `BB-${String(id).padStart(6, "0")}`;
     await c.env.DB.prepare("UPDATE users SET account_no=? WHERE id=?").bind(accountNo, id).run();
+    setAudit(c, { target_user_id: id, target_label: `${name} (${accountNo})`, details: { user_id: id, account_no: accountNo, email, phone } });
     return c.json({ id, accountNo }, 201);
   } catch (error) {
+    auditFailure(c, String(error.message).includes("UNIQUE") ? "duplicate_email" : "create_failed", { email });
     return c.json({ error: String(error.message).includes("UNIQUE") ? "This email is already registered." : "Could not create member." }, 409);
   }
 });
 
 app.patch("/api/members/:id/status", auth, adminOnly, async (c) => {
   const body = await readBody(c);
+  const memberId = Number(c.req.param("id"));
   const active = body.active ? 1 : 0;
   const info = await c.env.DB
     .prepare("UPDATE users SET active=? WHERE id=? AND role='member'")
-    .bind(active, Number(c.req.param("id")))
+    .bind(active, memberId)
     .run();
-  if (!info.meta.changes) return c.json({ error: "Member not found." }, 404);
+  setAudit(c, { target_user_id: memberId, target_label: `Member #${memberId}`, details: { member_id: memberId, active } });
+  if (!info.meta.changes) {
+    auditFailure(c, "member_not_found");
+    return c.json({ error: "Member not found." }, 404);
+  }
+  return c.json({ ok: true });
+});
+
+app.post("/api/members/:id/reset-password", auth, adminOnly, async (c) => {
+  const memberId = Number(c.req.param("id"));
+  const body = await readBody(c);
+  const password = String(body.password || "");
+  const member = await c.env.DB
+    .prepare("SELECT id,name,email,account_no FROM users WHERE id=? AND role='member'")
+    .bind(memberId)
+    .first();
+  if (!member) {
+    auditFailure(c, "member_not_found", { member_id: memberId });
+    return c.json({ error: "Member not found." }, 404);
+  }
+  const issue = passwordIssue(password, member);
+  if (issue) {
+    auditFailure(c, "password_policy_failed", { reason_detail: issue });
+    return c.json({ error: issue }, 400);
+  }
+  const hash = await hashPassword(password);
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE users SET password_hash=? WHERE id=? AND role='member'").bind(hash, memberId),
+    c.env.DB.prepare("DELETE FROM password_resets WHERE user_id=?").bind(memberId)
+  ]);
+  setAudit(c, {
+    target_user_id: memberId,
+    target_label: `${member.name} (${member.account_no || memberId})`,
+    details: { user_id: memberId, email: member.email, reason: "password_reset_by_admin" }
+  });
   return c.json({ ok: true });
 });
 
@@ -704,24 +1073,39 @@ app.post("/api/payments", auth, async (c) => {
   const note = clean(body.note, 250);
   const member = await c.env.DB.prepare("SELECT id FROM users WHERE id=? AND role='member' AND active=1").bind(memberId).first();
   if (!member || !Number.isFinite(amount) || amount <= 0 || amount > 100000000 || !validMonth(month) || !validDate(date)) {
+    auditFailure(c, "invalid_payment", { member_id: memberId || null, amount, month, date });
     return c.json({ error: "Check member, amount, kisti month and payment date." }, 400);
   }
   const status = user.role === "admin" ? "approved" : "pending";
+  setAudit(c, {
+    target_user_id: memberId,
+    target_label: `Member #${memberId}`,
+    details: { member_id: memberId, amount, month, paid_date: date, method, reference, note, status }
+  });
   const info = await c.env.DB
     .prepare("INSERT INTO payments(member_id,amount,kisti_month,paid_date,method,reference,note,recorded_by,status,approved_by,approved_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
     .bind(memberId, amount, month, date, method, reference, note, user.id, status, status === "approved" ? user.id : null, status === "approved" ? nowIso() : null)
     .run();
-  return c.json({ id: info.meta.last_row_id, status }, 201);
+  const paymentId = info.meta.last_row_id;
+  setAudit(c, { target_label: `Payment #${paymentId}`, details: { payment_id: paymentId } });
+  return c.json({ id: paymentId, status }, 201);
 });
 
 app.post("/api/payments/:id/approve", auth, adminOnly, async (c) => {
   const paymentId = Number(c.req.param("id"));
-  if (!Number.isInteger(paymentId) || paymentId < 1) return c.json({ error: "Invalid payment record." }, 400);
+  setAudit(c, { target_label: `Payment #${paymentId}`, details: { payment_id: paymentId } });
+  if (!Number.isInteger(paymentId) || paymentId < 1) {
+    auditFailure(c, "invalid_payment");
+    return c.json({ error: "Invalid payment record." }, 400);
+  }
   const info = await c.env.DB
     .prepare("UPDATE payments SET status='approved',approved_by=?,approved_at=? WHERE id=? AND status='pending'")
     .bind(c.get("user").id, nowIso(), paymentId)
     .run();
-  if (!info.meta.changes) return c.json({ error: "Pending payment not found." }, 404);
+  if (!info.meta.changes) {
+    auditFailure(c, "pending_payment_not_found");
+    return c.json({ error: "Pending payment not found." }, 404);
+  }
   return c.json({ ok: true, status: "approved" });
 });
 
@@ -736,26 +1120,47 @@ app.patch("/api/payments/:id", auth, adminOnly, async (c) => {
   const reference = clean(body.reference, 80);
   const note = clean(body.note, 250);
   const member = await c.env.DB.prepare("SELECT id FROM users WHERE id=? AND role='member'").bind(memberId).first();
+  const before = await c.env.DB
+    .prepare("SELECT member_id,amount,kisti_month,paid_date,method,reference,note FROM payments WHERE id=?")
+    .bind(paymentId)
+    .first();
+  const after = { member_id: memberId, amount, kisti_month: month, paid_date: date, method, reference, note };
+  setAudit(c, {
+    target_user_id: memberId,
+    target_label: `Payment #${paymentId}`,
+    details: { payment_id: paymentId, before: before || null, after }
+  });
   if (!Number.isInteger(paymentId) || paymentId < 1 || !member || !Number.isFinite(amount) || amount <= 0 || amount > 100000000 || !validMonth(month) || !validDate(date)) {
+    auditFailure(c, "invalid_payment");
     return c.json({ error: "Check member, amount, kisti month and payment date." }, 400);
   }
   const info = await c.env.DB
     .prepare("UPDATE payments SET member_id=?,amount=?,kisti_month=?,paid_date=?,method=?,reference=?,note=? WHERE id=?")
     .bind(memberId, amount, month, date, method, reference, note, paymentId)
     .run();
-  if (!info.meta.changes) return c.json({ error: "Payment not found." }, 404);
+  if (!info.meta.changes) {
+    auditFailure(c, "payment_not_found");
+    return c.json({ error: "Payment not found." }, 404);
+  }
   return c.json({ ok: true });
 });
 
 app.delete("/api/payments/:id", auth, adminOnly, async (c) => {
-  const info = await c.env.DB.prepare("DELETE FROM payments WHERE id=?").bind(Number(c.req.param("id"))).run();
-  if (!info.meta.changes) return c.json({ error: "Payment not found." }, 404);
+  const paymentId = Number(c.req.param("id"));
+  const existing = await c.env.DB.prepare("SELECT * FROM payments WHERE id=?").bind(paymentId).first();
+  const info = await c.env.DB.prepare("DELETE FROM payments WHERE id=?").bind(paymentId).run();
+  setAudit(c, { target_label: `Payment #${paymentId}`, details: { payment_id: paymentId, deleted: existing || null } });
+  if (!info.meta.changes) {
+    auditFailure(c, "payment_not_found");
+    return c.json({ error: "Payment not found." }, 404);
+  }
   return c.json({ ok: true });
 });
 
 app.get("/api/report.csv", auth, adminOnly, async (c) => {
   const result = await c.env.DB.prepare(`SELECT u.name,u.email,u.phone,p.kisti_month,p.paid_date,p.amount,p.method,p.reference,p.note
     FROM payments p JOIN users u ON u.id=p.member_id WHERE p.status='approved' ORDER BY p.paid_date DESC,p.id DESC`).all();
+  setAudit(c, { details: { format: "csv", rows: result.results.length, scope: "approved_all" } });
   const quote = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const csv = [
     ["Member", "Email", "Phone", "Kisti month", "Paid date", "Amount BDT", "Method", "Reference", "Note"],
@@ -764,6 +1169,89 @@ app.get("/api/report.csv", auth, adminOnly, async (c) => {
   return c.body(`\ufeff${csv}`, 200, {
     "Content-Type": "text/csv; charset=utf-8",
     "Content-Disposition": 'attachment; filename="bondhu-bitto-report.csv"'
+  });
+});
+
+app.get("/api/activity-log", auth, adminOnly, async (c) => {
+  const user = c.get("user");
+  const query = c.req.query();
+  const limit = Math.min(Math.max(Number(query.limit) || 100, 1), 500);
+  const where = [];
+  const params = [];
+  if (user.role !== "admin") {
+    where.push("actor_id=?");
+    params.push(user.id);
+  } else if (/^\d+$/.test(query.user || "")) {
+    where.push("actor_id=?");
+    params.push(Number(query.user));
+  }
+  const action = clean(query.action, 80);
+  const category = clean(query.category, 40);
+  const outcome = clean(query.outcome, 20);
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(query.from || "") ? query.from : "";
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(query.to || "") ? query.to : "";
+  const search = clean(query.search, 100);
+  if (action) {
+    where.push("action=?");
+    params.push(action);
+  }
+  if (category) {
+    where.push("category=?");
+    params.push(category);
+  }
+  if (outcome === "success" || outcome === "failure") {
+    where.push("outcome=?");
+    params.push(outcome);
+  }
+  if (from) {
+    where.push("created_at>=?");
+    params.push(`${from}T00:00:00.000Z`);
+  }
+  if (to) {
+    where.push("created_at<=?");
+    params.push(`${to}T23:59:59.999Z`);
+  }
+  if (search) {
+    const term = `%${search}%`;
+    where.push("(action LIKE ? OR actor_name LIKE ? OR actor_email LIKE ? OR target_label LIKE ? OR details LIKE ?)");
+    params.push(term, term, term, term, term);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const rows = await c.env.DB
+    .prepare(`SELECT id,created_at,actor_id,actor_name,actor_email,actor_role,actor_source,target_user_id,target_label,action,category,method,path,status,outcome,ip,user_agent,details
+      FROM audit_logs ${whereSql} ORDER BY id DESC LIMIT ?`)
+    .bind(...params, limit)
+    .all();
+  const count = await c.env.DB.prepare(`SELECT COUNT(*) count FROM audit_logs ${whereSql}`).bind(...params).first();
+  const scopeWhere = user.role === "admin" ? "" : "WHERE actor_id=?";
+  const scopeParams = user.role === "admin" ? [] : [user.id];
+  const today = nowIso().slice(0, 10);
+  const [stats, actionRows, categoryRows, userRows] = await Promise.all([
+    c.env.DB.prepare(`SELECT COUNT(*) total,COALESCE(SUM(CASE WHEN substr(created_at,1,10)=? THEN 1 ELSE 0 END),0) today,COALESCE(SUM(CASE WHEN outcome='failure' THEN 1 ELSE 0 END),0) failures,COUNT(DISTINCT actor_id) actors FROM audit_logs ${scopeWhere}`)
+      .bind(today, ...scopeParams)
+      .first(),
+    c.env.DB.prepare(`SELECT DISTINCT action FROM audit_logs ${scopeWhere} ORDER BY action`).bind(...scopeParams).all(),
+    c.env.DB.prepare(`SELECT DISTINCT category FROM audit_logs ${scopeWhere} ORDER BY category`).bind(...scopeParams).all(),
+    user.role === "admin"
+      ? c.env.DB.prepare("SELECT id,name,email,account_no FROM users ORDER BY name COLLATE NOCASE").all()
+      : Promise.resolve({ results: [{ id: user.id, name: user.name, email: user.email, account_no: user.account_no }] })
+  ]);
+  return c.json({
+    logs: rows.results.map((row) => ({ ...row, details: parseAuditDetails(row.details) })),
+    total: Number(count?.count) || 0,
+    limit,
+    stats: {
+      total: Number(stats?.total) || 0,
+      today: Number(stats?.today) || 0,
+      failures: Number(stats?.failures) || 0,
+      actors: Number(stats?.actors) || 0
+    },
+    filters: {
+      actions: actionRows.results.map((row) => row.action),
+      categories: categoryRows.results.map((row) => row.category),
+      users: userRows.results
+    },
+    scope: user.role === "admin" ? "all" : "own"
   });
 });
 
