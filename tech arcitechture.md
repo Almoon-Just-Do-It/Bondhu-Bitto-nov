@@ -426,7 +426,7 @@ Print output is generated from the same DOM with CSS visibility rules and dynami
 | Element / state | Role |
 | --- | --- |
 | Base CSS | Print headers, footers, metadata, and `<tfoot>` spacers are hidden on screen. `@media print` reveals them and hides filters, actions, and scroll constraints. |
-| `@media screen` styles | The main visual theme is screen-scoped; print rules reset backgrounds, shadows, sticky positioning, and table sizing for paper. |
+| `@media screen` styles | The bKash-inspired `#bkashTheme` overrides are screen-scoped; print rules reset backgrounds, shadows, sticky positioning, and table sizing for paper. A small print-only override keeps brand accents in the same deep rose palette. |
 | `@page` | A4 portrait with 12 mm side margins, 12 mm top margin, and 24 mm bottom margin. |
 | `body.printing-ledger` | Added by the member-ledger print button; hides everything except `#memberLedgerPrint`. Removed after printing. |
 | Default payment-history state | With `printing-ledger` absent, print CSS shows only `#paymentHistoryPanel`. The print button removes `printing-ledger` and `printing-member-profile` before calling `window.print()`. |

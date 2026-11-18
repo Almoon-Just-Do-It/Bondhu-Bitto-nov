@@ -510,20 +510,21 @@ Tables always live in `.tablewrap` with `overflow-x: auto` (and `-webkit-overflo
 
 ## 8. Key style tokens
 
-From the active `modernStyles` layer (`public/index.html`); earlier style blocks are overridden where they conflict.
+The active bKash-inspired red theme is appended as `#bkashTheme` in `public/index.html`; it overrides earlier `modernStyles` and legacy color blocks without changing layout or behavior.
 
 | Token | Value | Used for |
 | --- | --- | --- |
-| `--navy` / `--navy-2` | `#071a26` / `#0b2b35` | Side bar, dark headers, sticky top text |
-| `--teal` / `--teal-2` | `#0fb79b` / `#2de2c5` | Primary buttons, accents, active nav, print rules |
-| `--bg` / `--card` | `#f2f6f4` / `#ffffff` | Page background / card surfaces |
-| `--ink` / `--muted` | `#0b1f2a` / `#657b83` | Primary text / secondary text |
-| `--line` | `#dfe9e6` | Borders, dividers |
-| `--shadow-sm` / `-md` / `-lg` | `0 2px 4px…, 0 18px 44px -24px…` / `0 4px 8px…, 0 28px 64px -30px…` / `0 6px 12px…, 0 44px 100px -36px…` (rgba `9,32,48`) | Cards, hover elevation, dialogs |
+| `--navy` / `--navy-2` | `#250510` / `#3d081d` | Deep burgundy sidebar and dark headers |
+| `--bkash` / `--bkash-deep` | `#e2136e` / `#b30d58` | Primary actions, links, badges, active states |
+| `--teal` / `--teal-2` | `#e2136e` / `#ff5c9f` | Compatibility aliases for older rules and accents |
+| `--bg` / `--card` | `#fff7fa` / `#ffffff` | Blush page background / white card surfaces |
+| `--ink` / `--muted` | `#271722` / `#7d6874` | Primary text / secondary text |
+| `--line` | `#f2dbe4` | Borders, dividers |
+| `--shadow-sm` / `-md` / `-lg` | `0 2px 4px…, 0 18px 44px -24px…` / `0 4px 8px…, 0 28px 64px -30px…` / `0 6px 12px…, 0 44px 100px -36px…` (rgba `67,8,33`) | Cards, hover elevation, dialogs |
 | Fonts | `Space Grotesk` headings; `Manrope` body | Loaded from Google Fonts with system fallbacks |
 | Radius | 12–30 px (cards 24 px, dialogs 26 px, hero 30 px, side 28 px) | Rounded surfaces |
-| `.panel` / `.stat` / `.hero` | White translucent cards, gradient top accents, gradient hero with wave overlay | Main content blocks |
-| `.badge` | Teal pill (`Approved`, `Active`) / amber variant (`Pending`) | Status display |
+| `.panel` / `.stat` / `.hero` | White/blush cards with pink top accents; burgundy-to-magenta hero with pink glow | Main content blocks |
+| `.badge` | Rose pill (`Approved`, `Success`, `Active`) / amber variant (`Pending`) | Status display |
 | `.tablewrap` | White rounded bordered container, `overflow-x: auto` | All data tables |
 | `#paymentFilterCount` | Small muted bold text | Payment filter result count |
 | `#activityLogSummary` | Pill row of muted metadata | Activity log totals and result count |

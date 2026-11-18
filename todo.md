@@ -27,6 +27,7 @@
 - Member profile editing with photo, NID images, nominee details, and signatures.
   - on-screen signature pads for own and nominee signatures with mouse, touch, and stylus support, live preview, Clear/Save, JPEG optimization, and persistence through the existing `PATCH /api/profile` flow.
 - Community Promise image hover zoom and full-size lightbox with keyboard access, close button, backdrop dismissal, and mobile layout.
+- bKash-inspired red visual theme layered over the existing SPA, covering navigation, hero, stats, cards, tables, forms, status badges, dialogs, login, quick actions, and print brand accents while preserving layout and behavior.
 - Monthly kisti recording, approval workflow, editing, deletion, and role-scoped history.
 - Monthly Kisti History:
   - fixed-height scroll container with sticky header
