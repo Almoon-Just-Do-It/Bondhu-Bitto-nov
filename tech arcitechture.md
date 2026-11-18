@@ -18,6 +18,7 @@ Important runtime differences:
 - Local SQLite data is not copied into D1 automatically.
 - Both runtimes write an audit record for every `/api/*` request; the Worker adds route-specific metadata, while the legacy server records request-level detail with login/logout actor enrichment.
 - There is no separate frontend build step: `public/index.html` is a single-file SPA containing its own CSS and JavaScript.
+- The SPA includes lightweight client-only UI behavior such as the Community Promise hover zoom and a native `<dialog>` full-size image lightbox; neither requires an API or schema change.
 
 ## 2. Request Flow and Authorization
 

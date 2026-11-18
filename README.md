@@ -17,6 +17,7 @@ The production application is a Cloudflare Worker using Hono, Cloudflare D1, and
 - Administrator-created member accounts with generated A/C numbers
 - Administrator-initiated member password reset from the Members table
 - Member profile editing with photo, NID images, nominee details, signatures, and on-screen signature drawing pads
+- Community Promise image with hover zoom and a keyboard-accessible full-size lightbox
 - Monthly kisti recording with pending submissions and administrator approval
 - Monthly Kisti History with month/status/search filters and a scrollable table
 - Individual member ledger and browser-based printing
