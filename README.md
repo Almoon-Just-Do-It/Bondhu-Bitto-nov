@@ -16,7 +16,7 @@ The production application is a Cloudflare Worker using Hono, Cloudflare D1, and
 - Administrator and member sign-in with 20-minute idle sessions
 - Administrator-created member accounts with generated A/C numbers
 - Administrator-initiated member password reset from the Members table
-- Member profile editing with photo, NID images, nominee details, and signatures
+- Member profile editing with photo, NID images, nominee details, signatures, and on-screen signature drawing pads
 - Monthly kisti recording with pending submissions and administrator approval
 - Monthly Kisti History with month/status/search filters and a scrollable table
 - Individual member ledger and browser-based printing

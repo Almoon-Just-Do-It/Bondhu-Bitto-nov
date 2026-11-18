@@ -25,6 +25,7 @@
   - password hash replacement and outstanding reset-token cleanup
   - `member.password_reset` audit entry with no password in responses or logs
 - Member profile editing with photo, NID images, nominee details, and signatures.
+  - on-screen signature pads for own and nominee signatures with mouse, touch, and stylus support, live preview, Clear/Save, JPEG optimization, and persistence through the existing `PATCH /api/profile` flow.
 - Monthly kisti recording, approval workflow, editing, deletion, and role-scoped history.
 - Monthly Kisti History:
   - fixed-height scroll container with sticky header
@@ -59,7 +60,7 @@
   - UI map in [visualmap.md](visualmap.md)
   - architecture in [tech arcitechture.md](tech%20arcitechture.md)
   - this status file in [todo.md](todo.md)
-- Verification completed for profile printing, payment filters/scroll, print output, mobile widths, monthly print regression, ledger print regression, reset-flow cleanup, Worker build, server syntax, inline UI syntax, audit-log smoke test, admin/member reset-password API checks, password non-leakage checks, local browser admin reset dialog validation, local browser admin activity-log visibility, member nav hidden with API `403`, live production admin activity-log visibility, live unauthenticated reset route `401`, and live admin reset dialog/named-audit-action checks.
+- Verification completed for profile printing, payment filters/scroll, print output, mobile widths, monthly print regression, ledger print regression, reset-flow cleanup, Worker build, server syntax, inline UI syntax, audit-log smoke test, admin/member reset-password API checks, password non-leakage checks, local browser admin reset dialog validation, local browser admin activity-log visibility, local browser signature-pad drawing/persistence checks (mouse, touch, 375px viewport), member nav hidden with API `403`, live production admin activity-log visibility, live unauthenticated reset route `401`, and live admin reset dialog/named-audit-action checks.
 
 ## Active
 

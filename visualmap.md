@@ -257,14 +257,15 @@ Selecting a member fetches `/api/members/:id/ledger` and unhides the table conta
 │ ─ NID information ─                                                    │
 │ My NID number | Nominee NID number                                      │
 │ My NID card image [preview/remove] | Nominee NID card image [...]      │
-│ My signature [preview/remove]      | Nominee signature [preview/remove]│
+│ My signature [preview/remove] [Draw signature]                          │
+│ Nominee signature [preview/remove] [Draw signature]                     │
 │ [ Save profile ]  #profileMessage                                       │
 ├──────────────────────────────────────────────────────────────────────────┤
 │ #profileOverview (rendered on the dashboard, not here at runtime)       │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-Fields are disabled until “Edit profile”; “Cancel edit” discards pending images and reloads the profile. Images are converted to JPEG and size-reduced client-side before saving.
+Fields are disabled until “Edit profile”; “Cancel edit” discards pending images and reloads the profile. Images are converted to JPEG and size-reduced client-side before saving. Each signature field also has a **Draw signature** button that opens a modal canvas pad with mouse, touch, and stylus support, a live thumbnail, Clear, Save signature, and Close. Drawn signatures are exported as JPEG data URLs under the 650 KiB profile-image limit and staged in the same pending state as file uploads; **Save profile** persists them.
 
 ### 4.6 Reports / CSV (`#reportsPage`, admin)
 

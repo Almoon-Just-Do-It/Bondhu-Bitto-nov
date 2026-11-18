@@ -181,7 +181,7 @@ Stores both administrators and members.
 | Identity | `id`, `name`, `email`, `phone`, `account_no` | `email` is unique with case-insensitive collation. `account_no` has a partial unique index when non-null; member creation generates `BB-` plus a zero-padded numeric ID. |
 | Security | `password_hash`, `role`, `active` | `role` is constrained to `admin` or `member`. `active = 0` blocks login and authenticated requests. Hash values are either the current PBKDF2 envelope or legacy bcrypt. |
 | Profile | `father_name`, `mother_name`, `nominee_name`, `nid`, `nominee_nid` | Text fields bounded by API validation; profile completion in the dashboard checks 13 identity/profile fields. |
-| Images | `profile_photo`, `nid_photo`, `nominee_nid_photo`, `own_signature`, `nominee_signature` | `TEXT` columns holding JPEG data URLs, not file paths. |
+| Images | `profile_photo`, `nid_photo`, `nominee_nid_photo`, `own_signature`, `nominee_signature` | `TEXT` columns holding JPEG data URLs, not file paths. Signatures may be uploaded or drawn in the browser canvas pads and exported to canonical JPEG client-side. |
 | Audit | `created_at` | Creation timestamp. |
 
 Relationships: one user has many payments as `member_id`, `recorded_by`, and `approved_by`; many notices as `created_by`; many emergency messages as `member_id` and `resolved_by`; many password-reset records as `user_id`; and many audit logs as `actor_id` or `target_user_id`.
@@ -260,6 +260,8 @@ All endpoints are mounted under `/api` by both implementations. Responses are JS
 | `GET` | `/api/me` | Authenticated | Return the current user snapshot; also acts as the client's session heartbeat. |
 | `GET` | `/api/profile` | Authenticated | Return the user's editable profile and image data URLs. |
 | `PATCH` | `/api/profile` | Authenticated | Update name, family/nominee/NID fields, and optionally profile/NID/signature images. |
+
+Signature images may arrive from a file upload or from the client-side drawing pads. Both paths send canonical JPEG data URLs and are validated by `parseProfileImage` (maximum 650 KiB decoded).
 
 ### 5.2 Members
 

@@ -616,5 +616,78 @@ const menuToggle=document.createElement('button');menuToggle.id='menuToggle';men
 function closeMobileNav(){document.body.classList.remove('nav-open');menuToggle.setAttribute('aria-expanded','false')}
 function toggleMobileNav(){const open=!document.body.classList.contains('nav-open');document.body.classList.toggle('nav-open',open);menuToggle.setAttribute('aria-expanded',String(open))}
 menuToggle.addEventListener('click',toggleMobileNav);navScrim.addEventListener('click',closeMobileNav);document.querySelectorAll('.nav button').forEach(button=>button.addEventListener('click',closeMobileNav));$('logout').addEventListener('click',closeMobileNav);document.addEventListener('keydown',event=>{if(event.key==='Escape')closeMobileNav()});window.addEventListener('resize',()=>{if(window.innerWidth>900)closeMobileNav()});
+const signaturePadStyle=document.createElement('style');
+signaturePadStyle.textContent='.signature-pad-dialog{width:min(820px,94vw);max-height:92vh;overflow:auto;border:1px solid var(--line);border-radius:14px;padding:20px}.signature-pad-canvas-wrap{background:#fff;border:1px dashed var(--line);border-radius:10px;overflow:hidden;margin-top:6px}.signature-pad-canvas{display:block;width:100%;height:auto;background:#fff;touch-action:none;cursor:crosshair}.signature-pad-tools{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.signature-pad-preview-wrap{display:flex;align-items:center;gap:10px;margin-top:10px;min-height:48px}.signature-pad-preview{max-height:48px;max-width:220px;object-fit:contain;border:1px solid var(--line);border-radius:6px;background:#fff;padding:3px}.signature-pad-hint{margin-top:8px}.signature-draw-button{margin-top:6px;margin-right:6px}.signature-hint{display:block;margin:4px 0}@media(max-width:650px){.signature-pad-dialog{width:96vw;padding:14px}.signature-pad-tools button{flex:1 1 120px}}';
+document.head.appendChild(signaturePadStyle);
+function signatureDataUrlBytes(data){const base64=String(data).split(',')[1]||'',padding=base64.endsWith('==')?2:base64.endsWith('=')?1:0;return Math.max(0,Math.floor(base64.length*3/4)-padding)}
+function createSignaturePad(target,title){
+  const dialog=document.createElement('dialog');
+  const headingId='signaturePadTitle-'+target;
+  dialog.className='signature-pad-dialog';
+  dialog.setAttribute('aria-labelledby',headingId);
+  dialog.innerHTML='<div class="panel-head"><div><h3 id="'+headingId+'">'+title+'</h3><div class="sub">Sign with a mouse, touchscreen, or stylus. Save replaces the current signature.</div></div><button type="button" class="secondary signature-pad-close">Close</button></div><div class="signature-pad-canvas-wrap"><canvas class="signature-pad-canvas" width="1200" height="400" aria-label="'+title+' drawing area"></canvas></div><div class="signature-pad-tools"><button type="button" class="secondary signature-pad-clear">Clear</button><button type="button" class="signature-pad-save">Save signature</button></div><div class="signature-pad-preview-wrap"><span class="sub">Live preview</span><img class="signature-pad-preview hidden" alt="Signature preview"></div><div class="signature-pad-message sub" aria-live="polite"></div>';
+  document.body.appendChild(dialog);
+  const canvas=dialog.querySelector('.signature-pad-canvas'),context=canvas.getContext('2d'),preview=dialog.querySelector('.signature-pad-preview'),message=dialog.querySelector('.signature-pad-message');
+  let drawing=false,lastPoint=null,hasInk=false,loadToken=0,activePointerId=null,onSave=()=>{};
+  context.lineWidth=5;
+  context.lineCap='round';
+  context.lineJoin='round';
+  context.strokeStyle='#0b1f2a';
+  context.fillStyle='#0b1f2a';
+  function resetCanvas(){loadToken++;drawing=false;lastPoint=null;activePointerId=null;hasInk=false;context.save();context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.restore();preview.classList.add('hidden');preview.removeAttribute('src');message.textContent=''}
+  function updatePreview(){if(!hasInk){preview.classList.add('hidden');preview.removeAttribute('src');return}preview.src=canvas.toDataURL('image/jpeg',.7);preview.classList.remove('hidden')}
+  function pointFromEvent(event){const rect=canvas.getBoundingClientRect();return{x:(event.clientX-rect.left)*(canvas.width/rect.width),y:(event.clientY-rect.top)*(canvas.height/rect.height)}}
+  function stopDrawing(event){if(!drawing)return;if(activePointerId!==null&&event&&event.pointerId!==undefined&&event.pointerId!==activePointerId)return;drawing=false;lastPoint=null;activePointerId=null;if(event&&event.pointerId!==undefined){try{canvas.releasePointerCapture(event.pointerId)}catch{}}updatePreview()}
+  function startDrawing(event){if(drawing||(event.pointerType==='mouse'&&event.button!==0))return;event.preventDefault();drawing=true;activePointerId=event.pointerId;lastPoint=pointFromEvent(event);hasInk=true;message.textContent='';try{canvas.setPointerCapture(event.pointerId)}catch{}context.beginPath();context.arc(lastPoint.x,lastPoint.y,context.lineWidth/2,0,Math.PI*2);context.fillStyle=context.strokeStyle;context.fill()}
+  function moveDrawing(event){if(!drawing||event.pointerId!==activePointerId||!lastPoint)return;event.preventDefault();const coalesced=event.getCoalescedEvents?event.getCoalescedEvents():[],points=coalesced.length?coalesced:[event];for(const item of points){const point=pointFromEvent(item);context.beginPath();context.moveTo(lastPoint.x,lastPoint.y);context.lineTo(point.x,point.y);context.stroke();lastPoint=point}hasInk=true}
+  canvas.addEventListener('pointerdown',startDrawing,{passive:false});
+  canvas.addEventListener('pointermove',moveDrawing,{passive:false});
+  canvas.addEventListener('pointerup',stopDrawing);
+  canvas.addEventListener('pointercancel',stopDrawing);
+  canvas.addEventListener('lostpointercapture',stopDrawing);
+  window.addEventListener('pointerup',stopDrawing);
+  window.addEventListener('pointercancel',stopDrawing);
+  dialog.querySelector('.signature-pad-clear').addEventListener('click',resetCanvas);
+  dialog.querySelector('.signature-pad-close').addEventListener('click',()=>dialog.close());
+  dialog.querySelector('.signature-pad-save').addEventListener('click',()=>{
+    if(!hasInk){message.textContent='Draw a signature first.';return}
+    let quality=.9,data=canvas.toDataURL('image/jpeg',quality);
+    while(signatureDataUrlBytes(data)>650*1024&&quality>.3){quality=Math.round((quality-.1)*10)/10;data=canvas.toDataURL('image/jpeg',quality)}
+    if(signatureDataUrlBytes(data)>650*1024){message.textContent='Signature is too large to save. Clear and try again.';return}
+    onSave(data);
+    dialog.close();
+  });
+  dialog.addEventListener('close',()=>{drawing=false;lastPoint=null;activePointerId=null});
+  resetCanvas();
+  return{open(value){resetCanvas();if(value){const token=loadToken,image=new Image();image.onload=()=>{if(token!==loadToken)return;const scale=Math.min(canvas.width/image.naturalWidth,canvas.height/image.naturalHeight),width=image.naturalWidth*scale,height=image.naturalHeight*scale;context.drawImage(image,(canvas.width-width)/2,(canvas.height-height)/2,width,height);hasInk=true;updatePreview()};image.onerror=()=>{if(token===loadToken)message.textContent='Could not load the saved signature. Clear and draw again.'};image.src=value}if(!dialog.open)dialog.showModal()},setSaveHandler(handler){onSave=handler}}
+}
+const ownSignaturePad=createSignaturePad('own','Draw my signature');
+ownSignaturePad.setSaveHandler(data=>{pendingOwnSignature=data;$('ownSignatureInput').value='';renderSignature('ownSignaturePreview','ownSignatureEmpty',data,'removeOwnSignature');refreshProfileOverview();msg('profileMessage','Signature ready. Save profile to store it.')});
+const nomineeSignaturePad=createSignaturePad('nominee','Draw nominee signature');
+nomineeSignaturePad.setSaveHandler(data=>{pendingNomineeSignature=data;$('nomineeSignatureInput').value='';renderSignature('nomineeSignaturePreview','nomineeSignatureEmpty',data,'removeNomineeSignature');refreshProfileOverview();msg('profileMessage','Signature ready. Save profile to store it.')});
+const ownSignatureHint=document.createElement('small');
+ownSignatureHint.className='sub signature-hint';
+ownSignatureHint.textContent='Draw directly on screen or upload a JPEG/PNG image.';
+$('ownSignatureInput').insertAdjacentElement('beforebegin',ownSignatureHint);
+const nomineeSignatureHint=document.createElement('small');
+nomineeSignatureHint.className='sub signature-hint';
+nomineeSignatureHint.textContent='Draw directly on screen or upload a JPEG/PNG image.';
+$('nomineeSignatureInput').insertAdjacentElement('beforebegin',nomineeSignatureHint);
+const drawOwnSignatureButton=document.createElement('button');
+drawOwnSignatureButton.id='drawOwnSignature';
+drawOwnSignatureButton.type='button';
+drawOwnSignatureButton.className='secondary signature-draw-button';
+drawOwnSignatureButton.textContent='Draw signature';
+drawOwnSignatureButton.addEventListener('click',()=>ownSignaturePad.open(pendingOwnSignature!==null?pendingOwnSignature:(profileData.own_signature||'')));
+$('ownSignatureInput').insertAdjacentElement('afterend',drawOwnSignatureButton);
+const drawNomineeSignatureButton=document.createElement('button');
+drawNomineeSignatureButton.id='drawNomineeSignature';
+drawNomineeSignatureButton.type='button';
+drawNomineeSignatureButton.className='secondary signature-draw-button';
+drawNomineeSignatureButton.textContent='Draw signature';
+drawNomineeSignatureButton.addEventListener('click',()=>nomineeSignaturePad.open(pendingNomineeSignature!==null?pendingNomineeSignature:(profileData.nominee_signature||'')));
+$('nomineeSignatureInput').insertAdjacentElement('afterend',drawNomineeSignatureButton);
+drawOwnSignatureButton.disabled=$('profileEditToggle').dataset.editing!=='true';
+drawNomineeSignatureButton.disabled=$('profileEditToggle').dataset.editing!=='true';
 start();
 </script></body></html>
