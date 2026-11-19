@@ -94,7 +94,10 @@ CREATE TABLE IF NOT EXISTS emergency_messages (
   status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','resolved')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   resolved_at TEXT,
-  resolved_by INTEGER REFERENCES users(id)
+  resolved_by INTEGER REFERENCES users(id),
+  admin_reply TEXT NOT NULL DEFAULT '',
+  replied_at TEXT,
+  replied_by INTEGER REFERENCES users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_notices_created ON notices(created_at);
 CREATE INDEX IF NOT EXISTS idx_emergency_status ON emergency_messages(status,created_at);
@@ -156,8 +159,8 @@ for (const [column, definition] of [
 
 const adminEmail = process.env.ADMIN_EMAIL || "admin@bondhubitto.local";
 const adminPassword = process.env.ADMIN_PASSWORD;
-if (!adminPassword || adminPassword.length < 10) {
-  console.error("Set ADMIN_PASSWORD in .env (minimum 10 characters).");
+if (!adminPassword || !adminPassword.trim()) {
+  console.error("Set ADMIN_PASSWORD in .env.");
   process.exit(1);
 }
 const existingAdmin = db.prepare("SELECT id FROM users WHERE email=?").get(adminEmail);
@@ -193,18 +196,10 @@ const clean = (v, max=200) => String(v ?? "").trim().slice(0,max);
 const validMonth = v => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(v));
 const validDate = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v)) && !Number.isNaN(Date.parse(v));
 const emailOk = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-const strongPasswordIssue = (password, { email = "", name = "" } = {}) => {
+const passwordIssue = password => {
   const value = String(password ?? "");
-  if (value.length < 12) return "Password must be at least 12 characters.";
+  if (!value.trim()) return "Enter a password.";
   if (value.length > 128) return "Password must be at most 128 characters.";
-  if (!/[a-z]/.test(value)) return "Password must include a lowercase letter.";
-  if (!/[A-Z]/.test(value)) return "Password must include an uppercase letter.";
-  if (!/[0-9]/.test(value)) return "Password must include a number.";
-  if (!/[^A-Za-z0-9]/.test(value)) return "Password must include a symbol.";
-  const lower = value.toLowerCase(), emailLocal = String(email).split("@")[0].toLowerCase();
-  if (emailLocal.length >= 3 && lower.includes(emailLocal)) return "Password must not contain your email address.";
-  const nameParts = String(name).toLowerCase().split(/\s+/).filter(part => part.length >= 3);
-  if (nameParts.some(part => lower.includes(part))) return "Password must not contain your name.";
   return "";
 };
 const imageMimes = new Set(["image/jpeg","image/png","image/webp"]);
@@ -237,6 +232,7 @@ const AUDIT_ROUTE_RULES = [
   { method: "DELETE", pattern: /^\/api\/notices\/[^/]+$/, action: "notice.deleted", category: "notice" },
   { method: "POST", pattern: /^\/api\/emergency$/, action: "emergency.sent", category: "emergency" },
   { method: "PATCH", pattern: /^\/api\/emergency\/[^/]+\/resolve$/, action: "emergency.resolved", category: "emergency" },
+  { method: "PATCH", pattern: /^\/api\/emergency\/[^/]+\/reply$/, action: "emergency.replied", category: "emergency" },
   { method: "POST", pattern: /^\/api\/members$/, action: "member.created", category: "member" },
   { method: "GET", pattern: /^\/api\/members\/[^/]+\/profile$/, action: "member.profile_viewed", category: "member" },
   { method: "PATCH", pattern: /^\/api\/members\/[^/]+\/profile$/, action: "member.profile_updated", category: "member" },
@@ -375,7 +371,8 @@ app.post("/api/password/forgot", passwordResetLimiter, (req,res) => {
 });
 app.post("/api/password/reset", passwordResetLimiter, (req,res) => {
   const token=clean(req.body?.token,128), password=String(req.body?.password||"");
-  if(password.length<10) return res.status(400).json({error:"Password must be at least 10 characters."});
+  const passwordProblem=passwordIssue(password);
+  if(passwordProblem) return res.status(400).json({error:passwordProblem});
   const tokenHash=crypto.createHash("sha256").update(token).digest("hex"), now=Date.now();
   const changePassword=db.transaction(()=>{
     const reset=db.prepare("SELECT user_id FROM password_resets WHERE token_hash=? AND expires_at>? AND used_at IS NULL").get(tokenHash,now);
@@ -485,11 +482,18 @@ app.post("/api/emergency", auth, emergencyLimiter, (req,res) => {
   res.status(201).json({id:info.lastInsertRowid,status:"new"});
 });
 app.get("/api/emergency", auth, adminOnly, (req,res) => {
-  const messages=db.prepare(`SELECT e.id,e.body,e.status,e.created_at,e.resolved_at,e.file_name,
+  const messages=db.prepare(`SELECT e.id,e.body,e.status,e.created_at,e.resolved_at,e.file_name,e.admin_reply,e.replied_at,
     (e.image_data IS NOT NULL) has_image,(e.file_data IS NOT NULL) has_file,
     u.id member_id,u.name member_name,u.account_no,u.email,u.phone
     FROM emergency_messages e JOIN users u ON u.id=e.member_id
     ORDER BY CASE e.status WHEN 'new' THEN 0 ELSE 1 END,e.created_at DESC,e.id DESC`).all();
+  res.json({messages});
+});
+app.get("/api/emergency/member", auth, (req,res) => {
+  if(req.user.role!=='member') return res.status(403).json({error:"Only member accounts can view their emergency messages."});
+  const messages=db.prepare(`SELECT e.id,e.body,e.status,e.created_at,e.admin_reply,e.replied_at,e.file_name,
+    (e.image_data IS NOT NULL) has_image,(e.file_data IS NOT NULL) has_file
+    FROM emergency_messages e WHERE e.member_id=? ORDER BY e.created_at DESC,e.id DESC`).all(req.user.id);
   res.json({messages});
 });
 app.get("/api/emergency/:id/image", auth, adminOnly, (req,res) => {
@@ -506,6 +510,15 @@ app.patch("/api/emergency/:id/resolve", auth, adminOnly, (req,res) => {
   const info=db.prepare("UPDATE emergency_messages SET status='resolved',resolved_at=?,resolved_by=? WHERE id=? AND status='new'")
     .run(new Date().toISOString(),req.user.id,Number(req.params.id));
   if(!info.changes) return res.status(404).json({error:"New emergency message not found."});
+  res.json({ok:true});
+});
+app.patch("/api/emergency/:id/reply", auth, adminOnly, (req,res) => {
+  const reply=clean(req.body?.reply,2000);
+  if(!reply) return res.status(400).json({error:"Write feedback before sending."});
+  const now=new Date().toISOString();
+  const info=db.prepare("UPDATE emergency_messages SET admin_reply=?,replied_at=?,replied_by=?,status='resolved',resolved_at=COALESCE(resolved_at,?),resolved_by=COALESCE(resolved_by,?) WHERE id=?")
+    .run(reply,now,req.user.id,now,req.user.id,Number(req.params.id));
+  if(!info.changes) return res.status(404).json({error:"Emergency message not found."});
   res.json({ok:true});
 });
 
@@ -588,7 +601,9 @@ app.patch("/api/members/:id/profile", auth, adminOnly, (req,res) => {
 app.post("/api/members", auth, adminOnly, (req,res) => {
   const name=clean(req.body.name,100), email=clean(req.body.email,254).toLowerCase();
   const phone=clean(req.body.phone,30), password=String(req.body.password||"");
-  if (!name || !emailOk(email) || password.length<10) return res.status(400).json({error:"Enter a name, valid email and a password of at least 10 characters."});
+  if (!name || !emailOk(email)) return res.status(400).json({error:"Enter a member name and a valid email address."});
+  const passwordProblem=passwordIssue(password);
+  if (passwordProblem) return res.status(400).json({error:passwordProblem});
   try {
     const hash=bcrypt.hashSync(password,12);
     const createMember=db.transaction(()=>{
@@ -613,7 +628,7 @@ app.post("/api/members/:id/reset-password", auth, adminOnly, (req,res) => {
     auditFailure(req,"member_not_found",{member_id:memberId});
     return res.status(404).json({error:"Member not found."});
   }
-  const issue=strongPasswordIssue(req.body.password, member);
+  const issue=passwordIssue(req.body.password);
   if (issue) {
     auditFailure(req,"password_policy_failed",{reason_detail:issue});
     return res.status(400).json({error:issue});

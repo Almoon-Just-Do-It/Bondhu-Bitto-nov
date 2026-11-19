@@ -13,8 +13,8 @@ Scope: the single-page UI in `public/index.html` (markup, inline CSS, inline JS)
 │ │ .side (sticky)    │ │ .main (max-width 1580px, padded)                     │ │
 │ │ 240–264px         │ │ ┌──────────────────────────────────────────────────┐ │ │
 │ │                   │ │ │ .top (sticky, glass)  [☰ hidden on desktop]      │ │ │
-│ │ [logo] BonDhu     │ │ │ BON DHU BITTO / COMMUNITY PORTAL                 │ │ │
-│ │        Bitto      │ │ │ Welcome, <name> 👋      Account · Logout         │ │ │
+│ │ [logo] BonDhu     │ │ │ ADMIN PANEL / OVERVIEW  or  MEMBER PORTAL / OVERVIEW │ │ │
+│ │        Bitto      │ │ │ Admin Panel Overview    Member Overview  · Logout   │ │ │
 │ │ WORKSPACE         │ │ └──────────────────────────────────────────────────┘ │ │
 │ │ ▦ Overview        │ │ ┌──────────────────────────────────────────────────┐ │ │
 │ │ ♙ Members   (A)   │ │ │ .hero   “Save together. Grow together.”          │ │ │
@@ -34,15 +34,15 @@ Scope: the single-page UI in `public/index.html` (markup, inline CSS, inline JS)
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-`(A)` = admin only, `(M)` = member only. Nav order as rendered: Overview, Members, Kisti records / My kisti, Profile, Member Ledger, Notice board, Emergency / Emergency inbox, Activity log, Reports. The side bar is `position: sticky` with its own scroll; the top bar is sticky inside `.main`.
+`(A)` = admin only, `(M)` = member only. Nav order as rendered: Overview, Members, Kisti records / My kisti, Profile, Member Ledger, Notice board, Emergency / Emergency inbox, Activity log, Reports. The side bar is `position: sticky` with its own scroll; the top bar is sticky inside `.main`. Every successful login and restored session returns to `#overviewPage` with Overview active and a role-specific heading; logout clears all password inputs immediately.
 
 ### 1.2 Mobile shell (≤ 900 px)
 
 ```
 ┌───────────────────────────────┐
 │ .top (sticky, wraps)          │
-│ [☰] BON DHU BITTO / PORTAL    │
-│ Welcome, <name> 👋            │
+│ [☰] ADMIN / MEMBER OVERVIEW   │
+│ Admin Panel / Member Overview │
 │ Account · Logout              │
 ├───────────────────────────────┤
 │ .hero (column, CTA full width)│
@@ -101,8 +101,8 @@ All three are `<form class="login">` cards inside `#loginView .loginwrap`; only 
               RESET (#resetPasswordForm)  ← opened via ?reset=<token>
         ┌───────────────────────────────┐
         │ Set a new password            │
-        │ 12–128 chars: upper, lower,   │
-        │ number and symbol             │
+        │ Any password up to 128 chars │
+        │ (non-empty)                   │
         │ [resetMessage — hidden]       │
         │ New password       [ input ]  │
         │ Confirm password   [ input ]  │
@@ -123,10 +123,10 @@ All three are `<form class="login">` cards inside `#loginView .loginwrap`; only 
 | Record Monthly Kisti | Select any active member | No member picker; records own payment | `#paymentMember` is `.adminnav`; description text changes |
 | Payment history actions & Member column | View / Approve / Edit / Delete + Member column | Own rows only; no Member column or Actions | `.adminnav`, `.paymentActions` |
 | Member Ledger | Yes | Hidden | `.adminnav` nav + page |
-| Notice board (read) | Yes | Yes | Shared page |
+| Notice board (read, full-size image viewer) | Yes | Yes | Shared page; `.attachment-open` → `#attachmentLightbox` |
 | Post / delete notice | Yes | Hidden | `.adminnav` form / delete button |
-| Emergency inbox | Yes | Hidden | `.adminnav` nav + panel |
-| Emergency message composer | Hidden | Yes | `.membernav` nav + panel |
+| Emergency inbox and reply composer | Yes | Hidden | `.adminnav` nav + panel |
+| Emergency message composer and admin reply list | Hidden | Yes | `.membernav` nav + panels |
 | Reports / Export CSV | Yes | Hidden | `.adminnav` nav + page |
 | Activity log | Yes | Hidden | `.adminnav` nav + page; `/api/activity-log` is admin-only |
 | Ask assistant | Yes | Yes | `.quick-actions` shown after login; answers vary by role |
@@ -151,13 +151,14 @@ Idle sessions expire after 20 minutes of inactivity; activity refreshes the sess
    showApp(): toggle .adminnav/.membernav, show .quick-actions,
               set name / A/C label, start idle timer, sync videos
                                                         │
-   loadAll(): /api/dashboard, /api/payments, /api/profile, /api/notices,
-              /api/contact-info
-              admin only: /api/members, /api/members/:id/ledger (if selected),
-                          /api/emergency
-                                                        │
-   nav click ──► showPage(page) ──► one section visible, button .active,
-                                   refresh notices / emergency inbox as needed
+    loadAll(): /api/dashboard, /api/payments, /api/profile, /api/notices,
+               /api/contact-info
+               admin only: /api/members, /api/members/:id/ledger (if selected),
+                           /api/emergency
+               member only: /api/emergency/member
+                                                         │
+    nav click ──► showPage(page) ──► one section visible, button .active,
+                                    refresh notices / emergency inbox / replies as needed
                                                         │
    #who button ──► showPage('profile')       hero “＋ Record kisti” ──► payments
    Logout / idle timeout / 401 ──► expireSession() ──► #loginForm
@@ -178,11 +179,11 @@ Idle sessions expire after 20 minutes of inactivity; activity refreshes the sess
 └─────────────────────────────────────────────────────────────┘
 ┌ .grid ─────────────────────────────┬─────────────────────────┐
 │ “Recent contributions” / “Recent  │ “Community promise”     │
-│  Kisti” table (latest 8 approved) │  photo + message + note │
+│  Kisti” table (latest 8 approved) │  tappable photo + note  │
 └────────────────────────────────────┴─────────────────────────┘
 ```
 
-Admin sees totals across all recorded contributions; member sees own lifetime savings, community total, community member count and “—” for average. The profile overview card (photo, name, email, father, mother, nominee, NIDs) sits directly under the hero for members. The Community Promise photo zooms on hover/focus and opens a full-size native `<dialog>` lightbox when clicked or activated by keyboard; the close button, backdrop click, and Escape dismiss it.
+Admin sees totals across all recorded contributions; member sees own lifetime savings, community total, community member count and “—” for average. The profile overview card (photo, name, email, father, mother, nominee, NIDs) sits directly under the hero for members. The Community promise photo opens a full-screen viewer by mouse click or tap, with zoom controls, drag-to-pan, backdrop/Esc close, and focus return.
 
 ### 4.2 Members (`#membersPage`, admin)
 
@@ -257,15 +258,14 @@ Selecting a member fetches `/api/members/:id/ledger` and unhides the table conta
 │ ─ NID information ─                                                    │
 │ My NID number | Nominee NID number                                      │
 │ My NID card image [preview/remove] | Nominee NID card image [...]      │
-│ My signature [preview/remove] [Draw signature]                          │
-│ Nominee signature [preview/remove] [Draw signature]                     │
+│ My signature [preview/upload/draw] | Nominee signature [preview/upload/draw] │
 │ [ Save profile ]  #profileMessage                                       │
 ├──────────────────────────────────────────────────────────────────────────┤
 │ #profileOverview (rendered on the dashboard, not here at runtime)       │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-Fields are disabled until “Edit profile”; “Cancel edit” discards pending images and reloads the profile. Images are converted to JPEG and size-reduced client-side before saving. Each signature field also has a **Draw signature** button that opens a modal canvas pad with mouse, touch, and stylus support, a live thumbnail, Clear, Save signature, and Close. Drawn signatures are exported as JPEG data URLs under the 650 KiB profile-image limit and staged in the same pending state as file uploads; **Save profile** persists them.
+Fields are disabled until “Edit profile”; “Cancel edit” discards pending images and reloads the profile. Images are converted to JPEG and size-reduced client-side before saving. Own and nominee signatures can be uploaded or drawn in a touch/mouse signature pad; drawing pads crop the ink to a white JPEG and attach it to the pending profile before saving.
 
 ### 4.6 Reports / CSV (`#reportsPage`, admin)
 
@@ -287,13 +287,19 @@ Fields are disabled until “Edit profile”; “Cancel edit” discards pending
 │ [ Publish notice ] #noticeMessage            │
 └───────────────────────────────────────────────┘
 ┌ panel “Notice board” (all roles) ────────────┐
-│ ┌ .notice-item ────────────────────────────┐ │
-│ │ Title | created_by · created_at [Delete]│ │
-│ │ body (pre-wrapped)                      │ │
-│ │ [inline image] [Download <file name>]   │ │
+│ ┌ .notice-item card, gradient accent ─────┐ │
+│ │ timestamp kicker | Title | Notice badge │ │
+│ │ Posted by <name> | body (pre-wrapped)   │ │
+│ │ [image: tap to enlarge] [↓ file]        │ │
+│ │ [Delete] (admin only)                   │ │
 │ └──────────────────────────────────────────┘ │
-│ ... or “No notices posted.”                  │
+│ ... or “No notices posted yet.”              │
 └───────────────────────────────────────────────┘
+                       │
+                       ▼
+              #attachmentLightbox
+       full-screen image with zoom, pan,
+       backdrop/Esc close, and focus return
 ```
 
 ### 4.8 Emergency inbox / widget (`#emergencyPage`)
@@ -301,14 +307,17 @@ Fields are disabled until “Edit profile”; “Cancel edit” discards pending
 ```
 MEMBER                                   ADMIN
 ┌ “Emergency message” ───────────┐      ┌ “Emergency inbox” ──────────────┐
-│ Send an urgent message ...      │      │ Messages sent by members        │
+│ Send an urgent message ...      │      │ #emergencyInboxMessage          │
 │ Message (textarea)              │      │ ┌ .notice-item ───────────────┐ │
 │ Image (optional) | File (...)   │      │ │ name + A/C | email · phone ·│ │
 │ [ Send to admin ]               │      │ │ timestamp | New/Resolved    │ │
 └─────────────────────────────────┘      │ │ body, image, file download  │ │
-                                         │ │ [ Mark resolved ]           │ │
-                                         │ └─────────────────────────────┘ │
-                                         └─────────────────────────────────┘
+┌ “Replies to my messages” ───────┐      │ │ existing feedback (if any)  │ │
+│ #emergencyRepliesList           │      │ │ [feedback textarea]         │ │
+│ feedback cards from admin       │      │ │ [ Send feedback ]           │ │
+└─────────────────────────────────┘      │ │ [ Mark resolved ]           │ │
+                                          │ └─────────────────────────────┘ │
+                                          └─────────────────────────────────┘
 ```
 
 ### 4.9 Ask assistant (`.quick-actions`)
@@ -382,7 +391,7 @@ Admin only; opened by “View” in the Members table.
 │ Nominee's name | Member NID | Nominee NID                         │
 │ Profile photo [preview/upload/remove]                             │
 │ Member NID image [...] | Nominee NID image [...]                  │
-│ Member signature [...] | Nominee signature [...]                  │
+│ Member signature [upload/draw] | Nominee signature [upload/draw]  │
 │ [ Save member changes ] [ Edit / Cancel edit ]                    │
 │ #adminMemberProfileMessage                                        │
 └────────────────────────────────────────────────────────────────────┘
@@ -425,7 +434,7 @@ Admin only; opened by “Reset password” in the Members table.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-The form validates the same 12–128 character mixed-case/number/symbol policy used for new members and checks that both entries match. Submitting calls `POST /api/members/:id/reset-password`, closes the dialog, refreshes data, and shows a status message in `#memberMessage`; the new password is never displayed after submission.
+The form validates the same simple non-empty password rule used for new members, allows any characters up to 128, and checks that both entries match. Submitting calls `POST /api/members/:id/reset-password`, closes the dialog, refreshes data, and shows a status message in `#memberMessage`; the new password is never displayed after submission.
 
 ## 6. Print outputs
 
@@ -510,7 +519,7 @@ Tables always live in `.tablewrap` with `overflow-x: auto` (and `-webkit-overflo
 
 ## 8. Key style tokens
 
-The active bKash-inspired red theme is appended as `#bkashTheme` in `public/index.html`; it overrides earlier `modernStyles` and legacy color blocks without changing layout or behavior.
+The active bKash-inspired red theme is appended as `#bkashTheme` in `public/index.html`; it overrides earlier `modernStyles`, `navStyles`, and legacy color blocks without changing layout or behavior. The effective palette is rose and deep burgundy; older teal variables remain compatibility aliases.
 
 | Token | Value | Used for |
 | --- | --- | --- |
@@ -523,6 +532,7 @@ The active bKash-inspired red theme is appended as `#bkashTheme` in `public/inde
 | `--shadow-sm` / `-md` / `-lg` | `0 2px 4px…, 0 18px 44px -24px…` / `0 4px 8px…, 0 28px 64px -30px…` / `0 6px 12px…, 0 44px 100px -36px…` (rgba `67,8,33`) | Cards, hover elevation, dialogs |
 | Fonts | `Space Grotesk` headings; `Manrope` body | Loaded from Google Fonts with system fallbacks |
 | Radius | 12–30 px (cards 24 px, dialogs 26 px, hero 30 px, side 28 px) | Rounded surfaces |
+| Navigation surfaces | Glass gradient top bar, gradient side rail, icon tiles, rose active glow, hover shimmer | Sidebar navigation, sticky header, mobile drawer |
 | `.panel` / `.stat` / `.hero` | White/blush cards with pink top accents; burgundy-to-magenta hero with pink glow | Main content blocks |
 | `.badge` | Rose pill (`Approved`, `Success`, `Active`) / amber variant (`Pending`) | Status display |
 | `.tablewrap` | White rounded bordered container, `overflow-x: auto` | All data tables |
@@ -531,7 +541,7 @@ The active bKash-inspired red theme is appended as `#bkashTheme` in `public/inde
 
 ## 9. Accessibility notes
 
-- Form controls use `<label>` elements; several bind via `for`/`id` (filters, profile photo, NID/signature uploads, member ledger select, notice/emergency attachments). Required fields, `minlength`, `pattern`, `title`, `autocomplete` and input modes are set on auth/member/payment forms.
+- Form controls use `<label>` elements; several bind via `for`/`id` (filters, profile photo, NID/signature uploads, member ledger select, notice/emergency attachments). Required fields, `maxlength`, `autocomplete` and input modes are set on auth/member/payment forms.
 - `#paymentFilterCount` and `#activityLogSummary` use `aria-live="polite"` so filter changes are announced.
 - Dialogs are native `<dialog>` opened with `showModal()` and closed with `close()`: the browser provides focus containment, backdrop and Escape-to-close; Close buttons are explicit. The dialogs themselves do not declare custom ARIA roles/labels.
 - The mobile menu button has `aria-label="Open navigation menu"` and `aria-expanded` kept in sync; the scrim, nav selection, Logout, Escape and resize all close the drawer.

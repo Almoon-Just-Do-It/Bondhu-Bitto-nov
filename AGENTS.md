@@ -31,6 +31,7 @@ Production URL: `https://bondhu-bitto-nov.abdullhamoon61780.workers.dev`
 | `wrangler.toml` | Worker name, `main`, compatibility date/flags, asset binding, SPA fallback, API-first routing, D1 binding, non-secret vars, observability. |
 | `migrations/0001_init.sql` | Base schema: `users`, `payments`, `password_resets`, `notices`, `emergency_messages`. |
 | `migrations/0002_audit_logs.sql` | Additive `audit_logs` schema and indexes. |
+| `migrations/0003_emergency_replies.sql` | Additive emergency feedback columns: `admin_reply`, `replied_at`, and `replied_by`. |
 | `server.js` | Legacy Express/SQLite implementation with startup schema creation and near-parity API. |
 | `.env.example` | Legacy server config template. |
 | `.dev.vars.example` | Local Worker config/secrets template. |
@@ -100,8 +101,8 @@ npx wrangler secret put MAIL_FROM
 ```
 
 - `JWT_SECRET` must be at least 32 random characters.
-- `ADMIN_PASSWORD` must be 12–128 characters with uppercase, lowercase, number, and symbol; it must not contain the admin email local part or a name token of three or more characters.
-- The administrator is created lazily on the first login when `ADMIN_EMAIL` and a policy-compliant `ADMIN_PASSWORD` are configured. `ensureAdmin()` caches readiness per Worker isolate.
+- `ADMIN_PASSWORD` must be non-empty and at most 128 characters.
+- The administrator is created lazily on the first login when `ADMIN_EMAIL` and a non-empty `ADMIN_PASSWORD` are configured. `ensureAdmin()` caches readiness per Worker isolate.
 - Password recovery requires both `RESEND_API_KEY` and a verified `MAIL_FROM` sender.
 - The D1 binding is `DB`, database name `bondhu-bitto`, migrations directory `migrations`.
 
@@ -117,7 +118,7 @@ Core tables:
 - `payments`: `member_id`, positive `amount`, `kisti_month` (`YYYY-MM`), `paid_date` (`YYYY-MM-DD`), method/reference/note, `recorded_by`, `status` (`pending|approved`), `approved_by`, `approved_at`.
 - `password_resets`: SHA-256 token hash, 30-minute expiry in epoch milliseconds, `used_at`.
 - `notices`: title/body, optional image/file BLOBs, author, timestamp.
-- `emergency_messages`: member message, optional BLOBs, `new|resolved`, resolver and timestamps.
+- `emergency_messages`: member message, optional BLOBs, `new|resolved`, resolver/timestamps, and admin feedback fields `admin_reply`, `replied_at`, and `replied_by`.
 - `audit_logs`: actor snapshot, target, action/category/outcome, method/path/status, IP/user agent, bounded JSON `details`, ISO timestamp.
 
 Rules:
@@ -188,6 +189,7 @@ Rules:
   - Neither for monthly Kisti History.
   - Refresh date/time on `beforeprint`; remove classes on `afterprint`.
 - Prefer `/image/...` for new static asset references. Existing `../image/...` references also resolve, but do not add more.
+- A screen-scoped bKash-inspired theme is layered in `#bkashTheme`; preserve the existing print-only color overrides.
 - Signature fields include native canvas drawing pads (`createSignaturePad`) in addition to file uploads. Keep exported signatures canonical JPEG data URLs within the 650 KiB profile-image limit, and preserve the existing pending-signature/save flow.
 - Keep forms accessible: label/control association, `aria-live` for dynamic counts, native `<dialog>` behavior, and visible text plus color for statuses.
 

@@ -3,31 +3,47 @@
 ## Current production state
 
 - Production Worker: `https://bondhu-bitto-nov.abdullhamoon61780.workers.dev`
-- Latest deployed code version: `b2820b1b-b027-42c9-a607-7a5058bd013f`
+- Latest deployed code version: `3e2e57b9-6619-435c-8852-ee2a61e9c216`
 - Database: Cloudflare D1 binding `DB`, database name `bondhu-bitto`
 - Assets: `public/` served through the Worker `ASSETS` binding
 - `audit_logs` exists in remote D1; admin-only Activity log UI and API are deployed
 - Admin member password reset is deployed and verified live
+- D1 migration `0003_emergency_replies.sql` applied to remote D1
+- Redesigned Notice Board, full-size attachment viewer, and admin emergency replies are deployed and live-checked
+- Simplified password rule is deployed: any non-empty password up to 128 characters
 - Root documentation changes do not require redeployment
+
+## Deployed in this session
+
+- Redesigned Notice Board with card-based responsive layout, gradient accents, status/date chips, clearer attachment rows, and polished empty state.
+- Added a reusable full-size attachment lightbox for notice images and emergency images with zoom, drag, backdrop/Esc close, and focus return.
+- Added admin emergency replies stored in `emergency_messages.admin_reply`, `replied_at`, and `replied_by`; replying marks the message resolved and the member sees feedback under “Replies to my messages”.
+- Added and applied `migrations/0003_emergency_replies.sql` to remote D1 before the Worker deploy.
+- Added Worker and Express endpoints `GET /api/emergency/member` and `PATCH /api/emergency/:id/reply`, plus `emergency.replied` audit mapping with reply text redacted.
+- Verified locally with `npm run build`, inline script syntax check, API smoke test, and Playwright desktop checks for notice lightbox, admin feedback composer, and member feedback visibility; live Worker check confirmed the new notice cards, lightbox, API fields, member-only feedback endpoint, and no page errors.
+- Simplified password validation in Worker, Express, and the SPA to accept any non-empty password up to 128 characters; verified with API/UI smoke tests and live asset checks after deployment.
 
 ## Completed
 
 - Cloudflare Worker production path with Hono, D1, asset serving, SPA fallback, and API-first routing.
 - Administrator and member authentication with:
   - normalized email validation
-  - 12–128 character password policy
+  - non-empty password policy with a 128-character maximum
   - Web Crypto PBKDF2 hashing at the Workers-compatible 100000-iteration limit
   - `bb_session` JWT cookie with `HttpOnly`, `SameSite=Strict`, HTTPS `Secure`
   - 20-minute idle expiry with sliding refresh and client heartbeat
+  - role-specific overview landing on every login/session restore (admin: Admin Panel Overview; member: Member Overview)
+  - all password inputs cleared immediately on logout/session expiry
 - Administrator member creation, activation/deactivation, profile viewing, profile editing, and password reset.
   - admin-only `POST /api/members/:id/reset-password`
-  - 12–128 character policy validation on the server and in the reset dialog
+  - simple password validation on the server and in the reset dialog
   - password hash replacement and outstanding reset-token cleanup
   - `member.password_reset` audit entry with no password in responses or logs
 - Member profile editing with photo, NID images, nominee details, and signatures.
-  - on-screen signature pads for own and nominee signatures with mouse, touch, and stylus support, live preview, Clear/Save, JPEG optimization, and persistence through the existing `PATCH /api/profile` flow.
-- Community Promise image hover zoom and full-size lightbox with keyboard access, close button, backdrop dismissal, and mobile layout.
-- bKash-inspired red visual theme layered over the existing SPA, covering navigation, hero, stats, cards, tables, forms, status badges, dialogs, login, quick actions, and print brand accents while preserving layout and behavior.
+  - own and nominee signatures can be uploaded or drawn in a touch/mouse signature pad
+  - drawn signatures are cropped, saved as white-background JPEG data URLs, and accepted by the existing 650 KB server validation
+- Community Promise full-screen viewer with zoom, drag-to-pan, accessible close behavior, and focus return.
+- bKash-inspired red visual theme layered over navigation, cards, forms, dialogs, login, and notice/emergency surfaces with screen-scoped print-safe overrides.
 - Monthly kisti recording, approval workflow, editing, deletion, and role-scoped history.
 - Monthly Kisti History:
   - fixed-height scroll container with sticky header
@@ -55,6 +71,10 @@
   - corrected Worker audit action/category extraction so route rules produce named actions
   - remote `audit_logs` table verified and audit build deployed to the production Worker
   - admin-only activity-log access deployed and verified live
+- Modernized navigation surfaces:
+  - glass gradient top bar with accent rail, status chip, and refined account area
+  - gradient sidebar with brand card, section divider, icon tiles, active glow, and hover shimmer
+  - polished mobile drawer with animated menu button and full-width navigation rows
 - In-app Ask assistant and optional WhatsApp shortcut.
 - Password reset flow implementation through Resend.
 - Documentation:
@@ -62,7 +82,7 @@
   - UI map in [visualmap.md](visualmap.md)
   - architecture in [tech arcitechture.md](tech%20arcitechture.md)
   - this status file in [todo.md](todo.md)
-- Verification completed for profile printing, payment filters/scroll, print output, mobile widths, monthly print regression, ledger print regression, reset-flow cleanup, Worker build, server syntax, inline UI syntax, audit-log smoke test, admin/member reset-password API checks, password non-leakage checks, local browser admin reset dialog validation, local browser admin activity-log visibility, local browser signature-pad drawing/persistence checks (mouse, touch, 375px viewport), local browser Community Promise hover/full-size lightbox checks (desktop, 375px viewport), member nav hidden with API `403`, live production admin activity-log visibility, live unauthenticated reset route `401`, and live admin reset dialog/named-audit-action checks.
+- Verification completed for profile printing, payment filters/scroll, print output, mobile widths, monthly print regression, ledger print regression, reset-flow cleanup, Worker build, server syntax, inline UI syntax, audit-log smoke test, admin/member reset-password API checks, password non-leakage checks, local browser admin reset dialog validation, local browser admin activity-log visibility, member nav hidden with API `403`, live production admin activity-log visibility, live unauthenticated reset route `401`, live admin reset dialog/named-audit-action checks, desktop/mobile navigation rendering, mobile menu animation, navigation active-state switching, live navigation asset checks, Community Promise full-screen viewer desktop/mobile interaction, zoom/pan, backdrop/Esc close, focus return, and live viewer asset checks, own/nominee signature drawing on desktop mouse and mobile touch, empty-pad validation, JPEG persistence within the 650 KB limit, admin signature-pad preview handling, and live signature-pad drawing on desktop/mobile with changes discarded, repeated admin/member login redirects plus logout password clearing, and live repeated admin redirect after navigating away and logging out, bKash theme rendering on desktop and mobile, and print-safe theme overrides.
 
 ## Active
 

@@ -18,7 +18,7 @@ Important runtime differences:
 - Local SQLite data is not copied into D1 automatically.
 - Both runtimes write an audit record for every `/api/*` request; the Worker adds route-specific metadata, while the legacy server records request-level detail with login/logout actor enrichment.
 - There is no separate frontend build step: `public/index.html` is a single-file SPA containing its own CSS and JavaScript.
-- The SPA includes lightweight client-only UI behavior such as the Community Promise hover zoom and a native `<dialog>` full-size image lightbox; neither requires an API or schema change.
+- The SPA includes client-only image lightboxes and a layered bKash-inspired red theme; neither requires an API or schema change.
 
 ## 2. Request Flow and Authorization
 
@@ -76,6 +76,7 @@ The UI mirrors these rules with `.adminnav` and `.membernav` classes, but server
 | `wrangler.toml` | Worker name, entry point, compatibility flags, asset binding and SPA behavior, D1 binding/migrations directory, non-secret variables, and observability. |
 | `migrations/0001_init.sql` | Base D1 schema for `users`, `payments`, `password_resets`, `notices`, and `emergency_messages`, plus indexes. |
 | `migrations/0002_audit_logs.sql` | Additive D1 schema for `audit_logs`, including actor, timestamp, action, outcome, detail, and lookup indexes. |
+| `migrations/0003_emergency_replies.sql` | Additive D1 columns for admin emergency feedback: `admin_reply`, `replied_at`, and `replied_by`. |
 | `server.js` | Legacy Express/SQLite implementation; creates and migrates its local schema (including `audit_logs`) at startup and serves `public/` as static files. |
 | `package.json` | Dependencies and scripts for legacy start/dev, Worker dev, build, deploy, and D1 migrations. |
 | `.env.example` | Template for legacy server configuration; contains placeholders only. |
@@ -86,7 +87,7 @@ The UI mirrors these rules with `.adminnav` and `.membernav` classes, but server
 
 ## 4. Data Model
 
-The Worker schema is defined across `migrations/0001_init.sql` and `migrations/0002_audit_logs.sql`. The legacy server creates a compatible schema at startup, applies additive columns for older databases, and includes the same `audit_logs` table shape.
+The Worker schema is defined across `migrations/0001_init.sql`, `migrations/0002_audit_logs.sql`, and `migrations/0003_emergency_replies.sql`. The legacy server creates a compatible schema at startup, applies additive columns for older databases, and includes the same `audit_logs` and emergency-feedback columns.
 
 ```mermaid
 erDiagram
@@ -182,7 +183,7 @@ Stores both administrators and members.
 | Identity | `id`, `name`, `email`, `phone`, `account_no` | `email` is unique with case-insensitive collation. `account_no` has a partial unique index when non-null; member creation generates `BB-` plus a zero-padded numeric ID. |
 | Security | `password_hash`, `role`, `active` | `role` is constrained to `admin` or `member`. `active = 0` blocks login and authenticated requests. Hash values are either the current PBKDF2 envelope or legacy bcrypt. |
 | Profile | `father_name`, `mother_name`, `nominee_name`, `nid`, `nominee_nid` | Text fields bounded by API validation; profile completion in the dashboard checks 13 identity/profile fields. |
-| Images | `profile_photo`, `nid_photo`, `nominee_nid_photo`, `own_signature`, `nominee_signature` | `TEXT` columns holding JPEG data URLs, not file paths. Signatures may be uploaded or drawn in the browser canvas pads and exported to canonical JPEG client-side. |
+| Images | `profile_photo`, `nid_photo`, `nominee_nid_photo`, `own_signature`, `nominee_signature` | `TEXT` columns holding JPEG data URLs, not file paths. |
 | Audit | `created_at` | Creation timestamp. |
 
 Relationships: one user has many payments as `member_id`, `recorded_by`, and `approved_by`; many notices as `created_by`; many emergency messages as `member_id` and `resolved_by`; many password-reset records as `user_id`; and many audit logs as `actor_id` or `target_user_id`.
@@ -229,6 +230,7 @@ The notice list query excludes blob payloads and exposes `has_image` / `has_file
 | Sender and content | `member_id`, `body` | Only `member` role accounts can create rows. |
 | Attachments | `image_mime`, `image_data`, `file_name`, `file_mime`, `file_data` | Stored as D1 blobs and served only to administrators. |
 | Workflow | `status`, `created_at`, `resolved_at`, `resolved_by` | Status is `new` or `resolved`; resolution records the admin and timestamp. |
+| Admin feedback | `admin_reply`, `replied_at`, `replied_by` | Admin reply text is returned in the admin inbox and the member's own message list; the reply itself is redacted from audit details. |
 | Reporting view | Joined member fields | Admin list joins `users` for member name, account number, email, and phone. |
 
 An index on `(status, created_at)` supports the admin inbox ordering.
@@ -261,8 +263,6 @@ All endpoints are mounted under `/api` by both implementations. Responses are JS
 | `GET` | `/api/me` | Authenticated | Return the current user snapshot; also acts as the client's session heartbeat. |
 | `GET` | `/api/profile` | Authenticated | Return the user's editable profile and image data URLs. |
 | `PATCH` | `/api/profile` | Authenticated | Update name, family/nominee/NID fields, and optionally profile/NID/signature images. |
-
-Signature images may arrive from a file upload or from the client-side drawing pads. Both paths send canonical JPEG data URLs and are validated by `parseProfileImage` (maximum 650 KiB decoded).
 
 ### 5.2 Members
 
@@ -300,6 +300,8 @@ Signature images may arrive from a file upload or from the client-side drawing p
 | `GET` | `/api/emergency/:id/image` | Admin | Stream an emergency image. |
 | `GET` | `/api/emergency/:id/file` | Admin | Stream an emergency file. |
 | `PATCH` | `/api/emergency/:id/resolve` | Admin | Mark one new message as resolved with timestamp and resolver. |
+| `GET` | `/api/emergency/member` | Authenticated member | List the signed-in member's messages with admin feedback fields. |
+| `PATCH` | `/api/emergency/:id/reply` | Admin | Save feedback for a member, mark the message resolved, and record responder/timestamp. |
 
 ### 5.5 Dashboard and Reports
 
@@ -369,14 +371,7 @@ Both client and server reject malformed addresses before database access. The Wo
 
 ### 7.2 Password policy
 
-Passwords must be 12–128 characters and contain:
-
-- At least one lowercase letter.
-- At least one uppercase letter.
-- At least one number.
-- At least one symbol.
-- No email local part of three or more characters.
-- No name token of three or more characters.
+Passwords must be non-empty and at most 128 characters. Any characters are accepted; there are no length, case, number, symbol, email, or name-content rules.
 
 These checks are duplicated in the browser and on the server for account creation and password reset. Login deliberately does not disclose whether an email exists.
 
@@ -426,7 +421,7 @@ Print output is generated from the same DOM with CSS visibility rules and dynami
 | Element / state | Role |
 | --- | --- |
 | Base CSS | Print headers, footers, metadata, and `<tfoot>` spacers are hidden on screen. `@media print` reveals them and hides filters, actions, and scroll constraints. |
-| `@media screen` styles | The bKash-inspired `#bkashTheme` overrides are screen-scoped; print rules reset backgrounds, shadows, sticky positioning, and table sizing for paper. A small print-only override keeps brand accents in the same deep rose palette. |
+| `@media screen` styles | The bKash-inspired `#bkashTheme` overrides are screen-scoped; print rules reset backgrounds, shadows, sticky positioning, and table sizing for paper. A small print-only override keeps brand accents in the deep rose palette. |
 | `@page` | A4 portrait with 12 mm side margins, 12 mm top margin, and 24 mm bottom margin. |
 | `body.printing-ledger` | Added by the member-ledger print button; hides everything except `#memberLedgerPrint`. Removed after printing. |
 | Default payment-history state | With `printing-ledger` absent, print CSS shows only `#paymentHistoryPanel`. The print button removes `printing-ledger` and `printing-member-profile` before calling `window.print()`. |
@@ -501,7 +496,7 @@ Notes:
 - Existing deployments must apply `0002_audit_logs.sql` before deploying the Activity log UI; audit writes fail quietly until the table exists.
 - `APP_URL`, `ADMIN_NAME`, and `WHATSAPP_NUMBER` are ordinary configuration variables in `wrangler.toml`; `APP_URL` is used as the base for reset links.
 - `JWT_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `RESEND_API_KEY`, and `MAIL_FROM` must not be placed in committed files.
-- The admin record is created lazily on the first login when `ADMIN_EMAIL` and a policy-compliant `ADMIN_PASSWORD` are available.
+- The admin record is created lazily on the first login when `ADMIN_EMAIL` and a non-empty `ADMIN_PASSWORD` are available.
 - Local Worker development uses `.dev.vars`, `npm run db:migrate:local`, and `npm run dev:worker`.
 - Legacy local development uses `.env`, `npm start`, or `npm run dev`, with SQLite stored under `data/`.
 - Local SQLite data is not migrated into D1 automatically.

@@ -8,7 +8,6 @@ const app = new Hono();
 const SESSION_COOKIE = "bb_session";
 const SESSION_SECONDS = 20 * 60;
 const PASSWORD_ITERATIONS = 100000;
-const PASSWORD_MIN_LENGTH = 12;
 const PASSWORD_MAX_LENGTH = 128;
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -55,25 +54,12 @@ function normalizeEmail(value) {
   return email;
 }
 
-function passwordIssue(password, { email = "", name = "" } = {}) {
-  if (typeof password !== "string" || password.length < PASSWORD_MIN_LENGTH) {
-    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
+function passwordIssue(password) {
+  if (typeof password !== "string" || !password.trim()) {
+    return "Enter a password.";
   }
   if (password.length > PASSWORD_MAX_LENGTH) {
     return `Password must be at most ${PASSWORD_MAX_LENGTH} characters.`;
-  }
-  if (!/[a-z]/.test(password)) return "Password must include a lowercase letter.";
-  if (!/[A-Z]/.test(password)) return "Password must include an uppercase letter.";
-  if (!/[0-9]/.test(password)) return "Password must include a number.";
-  if (!/[^A-Za-z0-9]/.test(password)) return "Password must include a symbol.";
-  const lower = password.toLowerCase();
-  const emailLocal = String(email).split("@")[0].toLowerCase();
-  if (emailLocal.length >= 3 && lower.includes(emailLocal)) {
-    return "Password must not contain your email address.";
-  }
-  const nameParts = String(name).toLowerCase().split(/\s+/).filter((part) => part.length >= 3);
-  if (nameParts.some((part) => lower.includes(part))) {
-    return "Password must not contain your name.";
   }
   return "";
 }
@@ -223,6 +209,7 @@ const AUDIT_ROUTE_RULES = [
   { method: "DELETE", pattern: /^\/api\/notices\/[^/]+$/, action: "notice.deleted", category: "notice" },
   { method: "POST", pattern: /^\/api\/emergency$/, action: "emergency.sent", category: "emergency" },
   { method: "PATCH", pattern: /^\/api\/emergency\/[^/]+\/resolve$/, action: "emergency.resolved", category: "emergency" },
+  { method: "PATCH", pattern: /^\/api\/emergency\/[^/]+\/reply$/, action: "emergency.replied", category: "emergency" },
   { method: "POST", pattern: /^\/api\/members$/, action: "member.created", category: "member" },
   { method: "GET", pattern: /^\/api\/members\/[^/]+\/profile$/, action: "member.profile_viewed", category: "member" },
   { method: "GET", pattern: /^\/api\/members\/[^/]+\/ledger$/, action: "member.ledger_viewed", category: "member" },
@@ -342,7 +329,7 @@ async function ensureAdmin(env) {
       if (existing) return;
       const name = clean(env.ADMIN_NAME || "BonDhu Bitto Admin", 100);
       const password = String(env.ADMIN_PASSWORD || "");
-      const issue = passwordIssue(password, { email, name });
+      const issue = passwordIssue(password);
       if (issue) throw new Error(`Set ADMIN_PASSWORD secret. ${issue}`);
       const hash = await hashPassword(password);
       await env.DB.prepare("INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?,'admin')")
@@ -556,7 +543,7 @@ app.post("/api/password/reset", rateLimit("reset", 5, 15 * 60 * 1000), async (c)
   }
   auditActor(c, { id: reset.user_id, email: reset.email, name: reset.name, role: reset.role }, "password_reset_token");
   auditTarget(c, reset.user_id, reset.email);
-  const issue = passwordIssue(password, reset);
+  const issue = passwordIssue(password);
   if (issue) {
     auditFailure(c, "password_policy_failed", { reason_detail: issue });
     return c.json({ error: issue }, 400);
@@ -775,11 +762,23 @@ app.post("/api/emergency", auth, rateLimit("emergency", 3, 15 * 60 * 1000), asyn
 });
 
 app.get("/api/emergency", auth, adminOnly, async (c) => {
-  const result = await c.env.DB.prepare(`SELECT e.id,e.body,e.status,e.created_at,e.resolved_at,e.file_name,
+  const result = await c.env.DB.prepare(`SELECT e.id,e.body,e.status,e.created_at,e.resolved_at,e.file_name,e.admin_reply,e.replied_at,
     (e.image_data IS NOT NULL) has_image,(e.file_data IS NOT NULL) has_file,
     u.id member_id,u.name member_name,u.account_no,u.email,u.phone
     FROM emergency_messages e JOIN users u ON u.id=e.member_id
     ORDER BY CASE e.status WHEN 'new' THEN 0 ELSE 1 END,e.created_at DESC,e.id DESC`).all();
+  return c.json({ messages: result.results });
+});
+
+app.get("/api/emergency/member", auth, async (c) => {
+  if (c.get("user").role !== "member") {
+    return c.json({ error: "Only member accounts can view their emergency messages." }, 403);
+  }
+  const result = await c.env.DB.prepare(`SELECT e.id,e.body,e.status,e.created_at,e.admin_reply,e.replied_at,e.file_name,
+    (e.image_data IS NOT NULL) has_image,(e.file_data IS NOT NULL) has_file
+    FROM emergency_messages e WHERE e.member_id=? ORDER BY e.created_at DESC,e.id DESC`)
+    .bind(c.get("user").id)
+    .all();
   return c.json({ messages: result.results });
 });
 
@@ -820,6 +819,27 @@ app.patch("/api/emergency/:id/resolve", auth, adminOnly, async (c) => {
   if (!info.meta.changes) {
     auditFailure(c, "emergency_not_found");
     return c.json({ error: "New emergency message not found." }, 404);
+  }
+  return c.json({ ok: true });
+});
+
+app.patch("/api/emergency/:id/reply", auth, adminOnly, async (c) => {
+  const messageId = Number(c.req.param("id"));
+  const body = await readBody(c);
+  const reply = clean(body.reply, 2000);
+  setAudit(c, { target_label: `Emergency #${messageId}`, details: { message_id: messageId, reply_length: reply.length } });
+  if (!reply) {
+    auditFailure(c, "empty_emergency_reply");
+    return c.json({ error: "Write feedback before sending." }, 400);
+  }
+  const now = nowIso();
+  const info = await c.env.DB
+    .prepare("UPDATE emergency_messages SET admin_reply=?,replied_at=?,replied_by=?,status='resolved',resolved_at=COALESCE(resolved_at,?),resolved_by=COALESCE(resolved_by,?) WHERE id=?")
+    .bind(reply, now, c.get("user").id, now, c.get("user").id, messageId)
+    .run();
+  if (!info.meta.changes) {
+    auditFailure(c, "emergency_not_found");
+    return c.json({ error: "Emergency message not found." }, 404);
   }
   return c.json({ ok: true });
 });
@@ -987,7 +1007,7 @@ app.post("/api/members", auth, adminOnly, async (c) => {
   if (!name || !email) {
     return c.json({ error: "Enter a member name and a valid email address." }, 400);
   }
-  const issue = passwordIssue(password, { email, name });
+  const issue = passwordIssue(password);
   if (issue) return c.json({ error: issue }, 400);
   try {
     const hash = await hashPassword(password);
@@ -1034,7 +1054,7 @@ app.post("/api/members/:id/reset-password", auth, adminOnly, async (c) => {
     auditFailure(c, "member_not_found", { member_id: memberId });
     return c.json({ error: "Member not found." }, 404);
   }
-  const issue = passwordIssue(password, member);
+  const issue = passwordIssue(password);
   if (issue) {
     auditFailure(c, "password_policy_failed", { reason_detail: issue });
     return c.json({ error: issue }, 400);

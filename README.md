@@ -16,15 +16,16 @@ The production application is a Cloudflare Worker using Hono, Cloudflare D1, and
 - Administrator and member sign-in with 20-minute idle sessions
 - Administrator-created member accounts with generated A/C numbers
 - Administrator-initiated member password reset from the Members table
-- Member profile editing with photo, NID images, nominee details, signatures, and on-screen signature drawing pads
-- Community Promise image with hover zoom and a keyboard-accessible full-size lightbox
-- bKash-inspired red visual theme across the signed-in portal, dialogs, and login screen
+- Member profile editing with photo, NID images, nominee details, and signatures
+- On-screen signature drawing pads for own and nominee signatures
+- Community Promise image with a full-size lightbox
+- bKash-inspired red visual theme across the portal, dialogs, and login screen
 - Monthly kisti recording with pending submissions and administrator approval
 - Monthly Kisti History with month/status/search filters and a scrollable table
 - Individual member ledger and browser-based printing
 - Three-page member profile printout with NID pages
-- Notice board with optional image/file attachments
-- Member emergency inbox with optional attachments and resolution workflow
+- Redesigned notice board with image/file attachments and a full-size image viewer
+- Emergency messaging with attachments, resolution, and admin replies visible to the member
 - CSV export of approved contributions
 - Activity log page: administrator-only view of every user's actions
 - In-app Ask assistant and optional WhatsApp shortcut
@@ -48,6 +49,7 @@ The production application is a Cloudflare Worker using Hono, Cloudflare D1, and
 | `wrangler.toml` | Worker name, asset binding, D1 binding, variables, and observability |
 | `migrations/0001_init.sql` | Base D1 schema |
 | `migrations/0002_audit_logs.sql` | Activity log table and indexes |
+| `migrations/0003_emergency_replies.sql` | Admin emergency reply columns |
 | `server.js` | Legacy Express/SQLite server |
 | `.env.example` | Legacy server configuration template |
 | `.dev.vars.example` | Local Worker development configuration template |
@@ -73,7 +75,7 @@ Apply all migrations:
 npm run db:migrate
 ```
 
-For an existing deployment, this applies the new `0002_audit_logs.sql` migration. Run it before using the Activity log page; until then, audit writes fail quietly and only appear in Worker logs.
+For an existing deployment, this applies the newer `0002_audit_logs.sql` and `0003_emergency_replies.sql` migrations. Run them before using the Activity log page or admin emergency replies; until then, audit writes fail quietly and replies cannot be stored.
 
 Set production secrets. Wrangler prompts for each value; do not commit real values:
 
@@ -88,7 +90,7 @@ npx wrangler secret put MAIL_FROM
 Configuration notes:
 
 - `JWT_SECRET` must be at least 32 random characters.
-- `ADMIN_PASSWORD` must be 12–128 characters, including uppercase, lowercase, a number, and a symbol. It cannot contain the admin email local part or a name token of three or more characters.
+- `ADMIN_PASSWORD` must be non-empty and at most 128 characters.
 - The administrator account is created lazily on the first login when `ADMIN_EMAIL` and `ADMIN_PASSWORD` are configured.
 - `APP_URL`, `ADMIN_NAME`, and `WHATSAPP_NUMBER` are ordinary variables in `wrangler.toml`.
 - `APP_URL` must match the deployed Worker URL because it is used as the password-reset link base.
