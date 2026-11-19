@@ -3,7 +3,7 @@
 ## Current production state
 
 - Production Worker: `https://bondhu-bitto-nov.abdullhamoon61780.workers.dev`
-- Latest deployed code version: `3e2e57b9-6619-435c-8852-ee2a61e9c216`
+- Latest deployed code version: `7593f71a-ed02-4c89-9369-e5f75ac69de2`
 - Database: Cloudflare D1 binding `DB`, database name `bondhu-bitto`
 - Assets: `public/` served through the Worker `ASSETS` binding
 - `audit_logs` exists in remote D1; admin-only Activity log UI and API are deployed
