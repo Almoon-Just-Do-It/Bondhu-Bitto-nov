@@ -28,7 +28,7 @@ The production application is a Cloudflare Worker using Hono, Cloudflare D1, and
 - Emergency messaging with attachments, resolution, and admin replies visible to the member
 - CSV export of approved contributions
 - Activity log page: administrator-only view of every user's actions
-- In-app Ask assistant and optional WhatsApp shortcut
+- In-app Ask assistant with guided answers about Kisti, bKash payments, fines, payable totals, payment submission, profile, notices, and emergency help, plus an optional WhatsApp shortcut
 - Password reset links through Resend when mail secrets are configured
 
 ## Requirements

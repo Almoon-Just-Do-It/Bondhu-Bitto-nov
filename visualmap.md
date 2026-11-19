@@ -326,16 +326,16 @@ MEMBER                                   ADMIN
                     ┌ #askWidget ─────────────────────────┐
                     │ Ask                     [ Close ]  │
                     │ ┌ #askMessages (scrollable) ─────┐ │
-                    │ │ Hello! Ask about kisti, ...    │ │
-                    │ │ <user question>                │ │
-                    │ │ <canned answer>                │ │
+                     │ │ Welcome to BonDhu Bitto Samiti│ │
+                     │ │ <user question>                │ │
+                     │ │ <welcome + matched guidance>   │ │
                     │ └────────────────────────────────┘ │
                     │ [ Type a question ] [ Ask ]        │
                     └────────────────────────────────────┘
 [ Ask ] [ WhatsApp ]  ← fixed pills, bottom-right of viewport
 ```
 
-`Ask` toggles the widget; questions are matched locally to canned answers about kisti/payments, profile/NID/nominee/signature, notices, emergency, A/C number, with a fallback answer. No network call is made by the assistant.
+`Ask` toggles the widget; every reply begins with the BonDhu Bitto Samiti welcome. Questions are matched locally to guidance about Kisti amount (৳1,000), late fine (৳200 per 20 days), bKash 01735011844 with the ৳20 Send Money charge, checking totals/status through the WhatsApp Group and website Overview, submitting payments through My Kisti, plus profile/NID/nominee/signature, notices, emergency, and A/C number. Closing phrases such as thanks or bye return the friendly closing message. No network call is made by the assistant.
 
 ### 4.10 WhatsApp shortcut
 

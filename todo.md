@@ -3,7 +3,7 @@
 ## Current production state
 
 - Production Worker: `https://bondhu-bitto-nov.abdullhamoon61780.workers.dev`
-- Latest deployed code version: `7593f71a-ed02-4c89-9369-e5f75ac69de2`
+- Latest deployed code version: `ef0e3464-23ff-4eba-b5b1-88ecda4ec72e`
 - Database: Cloudflare D1 binding `DB`, database name `bondhu-bitto`
 - Assets: `public/` served through the Worker `ASSETS` binding
 - `audit_logs` exists in remote D1; admin-only Activity log UI and API are deployed
@@ -11,6 +11,7 @@
 - D1 migration `0003_emergency_replies.sql` applied to remote D1
 - Redesigned Notice Board, full-size attachment viewer, and admin emergency replies are deployed and live-checked
 - Simplified password rule is deployed: any non-empty password up to 128 characters
+- Ask assistant with Samiti welcome, Kisti/bKash guidance, payable-total/status checks, payment submission steps, and friendly closing message is deployed
 - Root documentation changes do not require redeployment
 
 ## Deployed in this session
@@ -22,6 +23,7 @@
 - Added Worker and Express endpoints `GET /api/emergency/member` and `PATCH /api/emergency/:id/reply`, plus `emergency.replied` audit mapping with reply text redacted.
 - Verified locally with `npm run build`, inline script syntax check, API smoke test, and Playwright desktop checks for notice lightbox, admin feedback composer, and member feedback visibility; live Worker check confirmed the new notice cards, lightbox, API fields, member-only feedback endpoint, and no page errors.
 - Simplified password validation in Worker, Express, and the SPA to accept any non-empty password up to 128 characters; verified with API/UI smoke tests and live asset checks after deployment.
+- Updated the Ask assistant to welcome members on every reply, answer Kisti amount/fine/bKash, payable total/status, and payment-submission questions with focused guidance, and send a friendly closing message; verified with response-intent checks and inline script syntax checks before deployment.
 
 ## Completed
 
@@ -75,14 +77,14 @@
   - glass gradient top bar with accent rail, status chip, and refined account area
   - gradient sidebar with brand card, section divider, icon tiles, active glow, and hover shimmer
   - polished mobile drawer with animated menu button and full-width navigation rows
-- In-app Ask assistant and optional WhatsApp shortcut.
+- In-app Ask assistant with guided Samiti answers and optional WhatsApp shortcut.
 - Password reset flow implementation through Resend.
 - Documentation:
   - current [README.md](README.md)
   - UI map in [visualmap.md](visualmap.md)
   - architecture in [tech arcitechture.md](tech%20arcitechture.md)
   - this status file in [todo.md](todo.md)
-- Verification completed for profile printing, payment filters/scroll, print output, mobile widths, monthly print regression, ledger print regression, reset-flow cleanup, Worker build, server syntax, inline UI syntax, audit-log smoke test, admin/member reset-password API checks, password non-leakage checks, local browser admin reset dialog validation, local browser admin activity-log visibility, member nav hidden with API `403`, live production admin activity-log visibility, live unauthenticated reset route `401`, live admin reset dialog/named-audit-action checks, desktop/mobile navigation rendering, mobile menu animation, navigation active-state switching, live navigation asset checks, Community Promise full-screen viewer desktop/mobile interaction, zoom/pan, backdrop/Esc close, focus return, and live viewer asset checks, own/nominee signature drawing on desktop mouse and mobile touch, empty-pad validation, JPEG persistence within the 650 KB limit, admin signature-pad preview handling, and live signature-pad drawing on desktop/mobile with changes discarded, repeated admin/member login redirects plus logout password clearing, and live repeated admin redirect after navigating away and logging out, bKash theme rendering on desktop and mobile, and print-safe theme overrides.
+- Verification completed for profile printing, payment filters/scroll, print output, mobile widths, monthly print regression, ledger print regression, reset-flow cleanup, Worker build, server syntax, inline UI syntax, audit-log smoke test, admin/member reset-password API checks, password non-leakage checks, local browser admin reset dialog validation, local browser admin activity-log visibility, member nav hidden with API `403`, live production admin activity-log visibility, live unauthenticated reset route `401`, live admin reset dialog/named-audit-action checks, desktop/mobile navigation rendering, mobile menu animation, navigation active-state switching, live navigation asset checks, Community Promise full-screen viewer desktop/mobile interaction, zoom/pan, backdrop/Esc close, focus return, and live viewer asset checks, own/nominee signature drawing on desktop mouse and mobile touch, empty-pad validation, JPEG persistence within the 650 KB limit, admin signature-pad preview handling, and live signature-pad drawing on desktop/mobile with changes discarded, repeated admin/member login redirects plus logout password clearing, and live repeated admin redirect after navigating away and logging out, bKash theme rendering on desktop and mobile, and print-safe theme overrides, Ask assistant welcome/intent/closing response checks.
 
 ## Active
 
