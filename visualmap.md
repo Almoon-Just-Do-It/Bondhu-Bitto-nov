@@ -30,7 +30,7 @@ Scope: the single-page UI in `public/index.html` (markup, inline CSS, inline JS)
 │ │ ▤ Reports   (A)    │ │                                                    │ │
 │ │ ┌ motto card ┐     │ │ footer: © <year> BonDhu Bitto                      │ │
 │ └───────────────────┘ └──────────────────────────────────────────────────────┘ │
-│ floating bottom-right: [ Ask ] [ WhatsApp (shown when configured) ]            │
+│ floating bottom-right: [ ? Ask ] [ WhatsApp (shown when configured) ]        │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -52,7 +52,7 @@ Scope: the single-page UI in `public/index.html` (markup, inline CSS, inline JS)
 │ panels / .tablewrap scroll-x  │
 │ footer                        │
 ├───────────────────────────────┤
-│ fixed [Ask] [WhatsApp] ↘      │
+│ fixed [? Ask] [WhatsApp] ↘    │
 └───────────────────────────────┘
 
 When body.nav-open:
@@ -129,7 +129,7 @@ All three are `<form class="login">` cards inside `#loginView .loginwrap`; only 
 | Emergency message composer and admin reply list | Hidden | Yes | `.membernav` nav + panels |
 | Reports / Export CSV | Yes | Hidden | `.adminnav` nav + page |
 | Activity log | Yes | Hidden | `.adminnav` nav + page; `/api/activity-log` is admin-only |
-| Ask assistant | Yes | Yes | `.quick-actions` shown after login; answers vary by role |
+| Ask assistant | Yes | Yes | `.quick-actions` shown after login; role-aware answers, branded chat panel, and mobile bottom sheet |
 | WhatsApp shortcut | Yes (when configured) | Yes (when configured) | `/api/contact-info` controls visibility |
 
 Idle sessions expire after 20 minutes of inactivity; activity refreshes the session via `/api/me` about every 5 minutes.
@@ -323,19 +323,21 @@ MEMBER                                   ADMIN
 ### 4.9 Ask assistant (`.quick-actions`)
 
 ```
-                    ┌ #askWidget ─────────────────────────┐
-                    │ Ask                     [ Close ]  │
-                    │ ┌ #askMessages (scrollable) ─────┐ │
+                     ┌ #askWidget ─────────────────────────┐
+                     │ ?  Ask BonDhu Bitto       [ × ]     │
+                     │    Instant help for members         │
+                     │ [Kisti amount] [Payment status] ... │
+                     │ ┌ #askMessages (scrollable) ─────┐ │
                      │ │ Welcome to BonDhu Bitto Samiti│ │
-                     │ │ <user question>                │ │
+                     │ │       <user bubble>           │ │
                      │ │ <welcome + matched guidance>   │ │
-                    │ └────────────────────────────────┘ │
-                    │ [ Type a question ] [ Ask ]        │
-                    └────────────────────────────────────┘
-[ Ask ] [ WhatsApp ]  ← fixed pills, bottom-right of viewport
+                     │ └────────────────────────────────┘ │
+                     │ [ Type your question ] [ Ask ]     │
+                     └────────────────────────────────────┘
+[ ? Ask ] [ WhatsApp ]  ← fixed pills, bottom-right of viewport
 ```
 
-`Ask` toggles the widget; every reply begins with the BonDhu Bitto Samiti welcome. Questions are matched locally to guidance about Kisti amount (৳1,000), late fine (৳200 per 20 days), bKash 01735011844 with the ৳20 Send Money charge, checking totals/status through the WhatsApp Group and website Overview, submitting payments through My Kisti, plus profile/NID/nominee/signature, notices, emergency, and A/C number. Closing phrases such as thanks or bye return the friendly closing message. No network call is made by the assistant.
+`Ask` toggles a branded chat panel with a suggested-question row, visually distinct user/bot bubbles, large touch targets, and a scrollable conversation area. On mobile it becomes a bottom sheet with a dimming scrim; the close button, scrim, or Escape closes it. Every reply begins with the BonDhu Bitto Samiti welcome. Questions are matched locally to guidance about Kisti amount (৳1,000), late fine (৳200 per 20 days), bKash 01735011844 with the ৳20 Send Money charge, checking totals/status through the WhatsApp Group and website Overview, submitting payments through My Kisti, plus profile/NID/nominee/signature, notices, emergency, and A/C number. Closing phrases such as thanks or bye return the friendly closing message. No network call is made by the assistant.
 
 ### 4.10 WhatsApp shortcut
 
