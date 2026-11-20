@@ -25,6 +25,7 @@ The production application is a Cloudflare Worker using Hono, Cloudflare D1, and
 - Role-aware dashboard stats, including community-wide average savings per active member for both administrators and members
 - Individual member ledger and browser-based printing
 - Three-page member profile printout with NID pages
+- Shared BonDhu Bitto name/logo footer on every printed page in all print formats
 - Redesigned notice board with image/file attachments and a full-size image viewer
 - Emergency messaging with attachments, resolution, and admin replies visible to the member
 - CSV export of approved contributions

@@ -427,7 +427,7 @@ Print output is generated from the same DOM with CSS visibility rules and dynami
 | Default payment-history state | With `printing-ledger` absent, print CSS shows only `#paymentHistoryPanel`. The print button removes `printing-ledger` and `printing-member-profile` before calling `window.print()`. |
 | `body.printing-member-profile` | Added by the profile print button; hides all top-level elements except `#memberProfilePrint` and hides dialog/payment/ledger containers. Removed after printing. |
 | Print headers | Dynamically inserted brand, title, member/account identity, date, and time blocks for payment history; a compact metadata block for the member ledger. |
-| Print footers | Fixed-position brand text and logo. `beforeprint` handlers refresh date and time values. |
+| Print footer | One shared fixed-position `#printBrandFooter` shows brand text, date/time and logo for all three print modes; it is shown above role-class visibility rules and the logo is decoded before `window.print()`. |
 | `<tfoot>` spacer | An empty table footer cell with 18 mm height prevents the fixed footer from overlapping long tables. Its `colspan` is recalculated from visible headers for payment history. |
 | Filters and scroll containers | Hidden or expanded in print so the full filtered table prints without an on-screen viewport. |
 

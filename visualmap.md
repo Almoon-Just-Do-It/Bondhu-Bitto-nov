@@ -440,7 +440,7 @@ The form validates the same simple non-empty password rule used for new members,
 
 ## 6. Print outputs
 
-Printing is driven by `window.print()` plus body classes: `printing-ledger` for the member ledger, `printing-member-profile` for the 3-page profile, and neither for Monthly Kisti History. Date/time values are refreshed on `beforeprint`; all three outputs use A4 portrait (12 mm sides, 24 mm bottom) and show the logo at bottom-right.
+Printing is driven by `window.print()` plus body classes: `printing-ledger` for the member ledger, `printing-member-profile` for the 3-page profile, and neither for Monthly Kisti History. Date/time values are refreshed on `beforeprint`; all three outputs use A4 portrait (12 mm sides, 24 mm bottom) and share one fixed `#printBrandFooter` with the BonDhu Bitto name and logo at bottom-right on every printed page.
 
 ### 6.1 Monthly Kisti History
 
@@ -505,7 +505,7 @@ PAGE 3 — Nominee NID
 └ footer: Date · Time · BonDhu Bitto · [logo] bottom-right ────┘
 ```
 
-Pages use `break-after: page` except the last. The footer is `position: fixed; right: 0; bottom: 0`, so date/time, brand text and logo repeat at the bottom-right of every page.
+Pages use `break-after: page` except the last. The shared `#printBrandFooter` is `position: fixed; left: 0; right: 0; bottom: 0`, so date/time, brand text and logo repeat at the bottom-right of every page.
 
 ## 7. Responsive behavior
 
