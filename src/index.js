@@ -861,6 +861,7 @@ app.get("/api/dashboard", auth, async (c) => {
       current: current.total,
       communityTotal: communityTotal.total,
       members: members.count,
+      average: members.count ? communityTotal.total / members.count : 0,
       payments: payments.results
     });
   }

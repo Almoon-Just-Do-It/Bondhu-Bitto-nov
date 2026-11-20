@@ -22,6 +22,7 @@ The production application is a Cloudflare Worker using Hono, Cloudflare D1, and
 - bKash-inspired red visual theme across the portal, dialogs, and login screen
 - Monthly kisti recording with pending submissions and administrator approval
 - Monthly Kisti History with month/status/search filters and a scrollable table
+- Role-aware dashboard stats, including community-wide average savings per active member for both administrators and members
 - Individual member ledger and browser-based printing
 - Three-page member profile printout with NID pages
 - Redesigned notice board with image/file attachments and a full-size image viewer

@@ -307,7 +307,7 @@ All endpoints are mounted under `/api` by both implementations. Responses are JS
 
 | Method | Endpoint | Access | Purpose |
 | --- | --- | --- | --- |
-| `GET` | `/api/dashboard` | Authenticated | Role-specific totals, active member count, recent activity, and profile completion for admins. |
+| `GET` | `/api/dashboard` | Authenticated | Role-specific totals, active member count, community-wide average savings per active member, recent activity, and profile completion for admins. |
 | `GET` | `/api/report.csv` | Admin | UTF-8 CSV of approved payments with member contact, month, date, amount, method, reference, and note. |
 
 ### 5.6 Contact Information

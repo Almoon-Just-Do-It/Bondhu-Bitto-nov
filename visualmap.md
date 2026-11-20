@@ -183,7 +183,7 @@ Idle sessions expire after 20 minutes of inactivity; activity refreshes the sess
 └────────────────────────────────────┴─────────────────────────┘
 ```
 
-Admin sees totals across all recorded contributions; member sees own lifetime savings, community total, community member count and “—” for average. The profile overview card (photo, name, email, father, mother, nominee, NIDs) sits directly under the hero for members. The Community promise photo opens a full-screen viewer by mouse click or tap, with zoom controls, drag-to-pan, backdrop/Esc close, and focus return.
+Admin sees totals across all recorded contributions; member sees own lifetime savings, community total, community member count, and the same community-wide average savings per active member. The profile overview card (photo, name, email, father, mother, nominee, NIDs) sits directly under the hero for members. The Community promise photo opens a full-screen viewer by mouse click or tap, with zoom controls, drag-to-pan, backdrop/Esc close, and focus return.
 
 ### 4.2 Members (`#membersPage`, admin)
 

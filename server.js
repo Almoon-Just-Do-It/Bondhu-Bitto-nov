@@ -529,7 +529,7 @@ app.get("/api/dashboard", auth, (req,res) => {
     const communityTotal = db.prepare("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE status='approved'").get().total;
     const members = db.prepare("SELECT COUNT(*) count FROM users WHERE role='member' AND active=1").get().count;
     const payments = db.prepare("SELECT * FROM payments WHERE member_id=? ORDER BY paid_date DESC,id DESC LIMIT 100").all(req.user.id);
-    return res.json({member:true,total,current,communityTotal,members,payments});
+    return res.json({member:true,total,current,communityTotal,members,average:members?communityTotal/members:0,payments});
   }
   const total = db.prepare("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE status='approved'").get().total;
   const current = db.prepare("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE kisti_month=? AND status='approved'").get(new Date().toISOString().slice(0,7)).total;
